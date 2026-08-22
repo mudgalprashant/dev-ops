@@ -132,16 +132,19 @@ clients break silently.
 
 ---
 
-## Branch protection to configure on GitHub
+## Branch protection
 
-The rules above are convention until GitHub enforces them. On each product repo:
+The rules above are convention until GitHub enforces them. **Step-by-step setup:
+[github-setup.md](github-setup.md)** — visibility, default branch, protection rules, and
+how to verify each control actually works.
 
-| Branch | Setting |
-| --- | --- |
-| `main` | Require a PR · require review · **restrict who can push** to the human · no force-push, no deletion |
-| `dev` | Require a PR · require status checks (CI) to pass · no force-push |
+Two things worth knowing before you read it:
 
-On `dev-ops`, apply the `main` settings to **`drovi`** and the `dev` settings to `dev`.
+- **GitHub cannot restrict who *opens* a PR**, only who merges. `.github/workflows/pr-guard.yml`
+  is the substitute: as a required status check, it blocks any PR into the release branch
+  that did not come from `dev`.
+- **"Only I can merge" comes from not granting write access**, not from a checkbox. These
+  are personal repos, so contributors fork — and a fork PR cannot be merged by its author.
 
 ⚠️ Until this is configured, nothing stops a direct push. Convention is not a control.
 
