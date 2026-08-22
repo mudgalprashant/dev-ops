@@ -48,7 +48,18 @@ plan. Private repos do not.
 
 `Settings` → `General` → scroll to **Danger Zone** → **Change visibility** → *Make public*.
 
-Do this for `drovi-backend`, `drovi-frontend`, `dev-ops`, and `global-context`.
+| Repo | Visibility | Consequence |
+| --- | --- | --- |
+| `drovi-backend` | **public** ✅ done | branch protection available |
+| `drovi-frontend` | **public** ✅ done | branch protection available |
+| `dev-ops` | **public** ✅ done | branch protection available |
+| `global-context` | **private, deliberately** | **no branch protection** on the free plan — see Step 5 |
+
+`global-context` stays private by choice. It is a working index for agents rather than
+something a contributor reads, and it carries no code. The trade is that its `drovi` branch
+is unprotected: nothing prevents a force-push or a deletion there. Treat that as a known,
+accepted gap rather than an oversight — and keep a local clone, because the remote is the
+only other copy.
 
 **Before you do:** confirm nothing secret is in the history. All four repos were
 history-reset on 2026-08-23 to a single commit each and scanned — no keys, no `.env`, no
@@ -91,13 +102,33 @@ Branch name pattern: **`main`** — except in `dev-ops`, where it is **`drovi`**
 | ↳ Required approvals | **0** while you are solo | ⚠️ see the trap below |
 | ↳ Require review from Code Owners | ⬜ while solo, ✅ once approvals ≥ 1 | routes PRs to you |
 | Require status checks to pass | ✅ | |
-| ↳ Select **`release-prs-come-from-dev`** | ✅ | this is what blocks a PR into `main` that skipped `dev` |
-| ↳ Select your CI check too | ✅ | |
+| ↳ Select **`release-prs-come-from-dev`** | ⏳ **not yet selectable** — see below | this is what blocks a PR into `main` that skipped `dev` |
+| ↳ Select your CI check too | ⏳ same | |
 | Require branches to be up to date before merging | ✅ | stops a green PR merging onto a moved base |
 | Require conversation resolution | ✅ | |
 | Do not allow bypassing the above settings | ⬜ **leave OFF while solo** | ⚠️ see the trap below |
 | Allow force pushes | ⬜ | |
 | Allow deletions | ⬜ | |
+
+### ⚠️ Status checks cannot be selected until they have run once
+
+GitHub only lists checks it has actually seen report on the repository. Until
+`pr-guard.yml` has run on at least one pull request, `release-prs-come-from-dev` does not
+appear in the picker — which is why this step is deferred rather than skipped.
+
+**The gap this leaves is real and worth naming.** Until the check is *required*, the guard
+is **advisory**: a PR into `main` from a stray branch will show a red ✗, and can still be
+merged. The rule is enforced by you noticing, not by GitHub.
+
+To close it:
+
+1. Merge these PRs into `dev` — the workflow file has to exist on the branch first.
+2. Open any PR into `main`. The guard runs and reports.
+3. Return to the `main` protection rule → **Require status checks to pass** → the check is
+   now in the list. Select it. Do the same for CI once a CI workflow reports.
+
+Put a reminder somewhere you will see it. This is the single step most likely to be
+forgotten, and it is the one that turns the branch model from convention into enforcement.
 
 ### ⚠️ The solo-maintainer trap
 
@@ -134,13 +165,24 @@ on, and *"Do not allow bypassing"* → on. At that point someone else can approv
 
 ---
 
-## Step 5 — `global-context`
+## Step 5 — `global-context` (private, unprotected)
 
-`global-context` has no `dev` branch on purpose: its context must be correct the moment the
-code it describes lands, so it is committed to `drovi` alongside the change.
+Two deliberate choices compound here:
 
-Protect `drovi` against **force pushes and deletions only** — do *not* require a PR, or
-you break the workflow that keeps context and code in the same commit.
+- it has **no `dev` branch** — its context must be correct the moment the code it describes
+  lands, so it is committed to `drovi` alongside the change
+- it stays **private**, so branch protection is unavailable on the free plan
+
+**Result: `drovi` in `global-context` has no protection at all.** A force-push or a branch
+deletion there is unrecoverable from GitHub alone.
+
+Mitigations, in order of effort:
+
+| Do this | Buys |
+| --- | --- |
+| Keep a local clone and `git fetch` it periodically | a second copy of every commit |
+| Tag releases (`git tag ctx-YYYYMMDD && git push --tags`) | named recovery points |
+| Make it public later, or move it into an org | real protection |
 
 ---
 
@@ -170,8 +212,8 @@ does not match `dev-ops`'s release branch, which is `drovi`.
 
 | Goal | Enforced by |
 | --- | --- |
-| Nobody commits to `main` | Branch protection: require a PR |
-| Only `dev` reaches `main` | `pr-guard.yml` as a required status check |
+| Nobody commits to `main` | Branch protection: require a PR ✅ |
+| Only `dev` reaches `main` | `pr-guard.yml` as a **required** status check ⏳ *advisory until selected — see Step 3* |
 | Only you merge | Personal repo + **no write collaborators** |
 | Every PR reaches you | `.github/CODEOWNERS` |
 | Anyone can contribute to `dev` | Public repo, fork + PR, `dev` as default branch |

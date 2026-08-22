@@ -93,6 +93,10 @@ correct *the moment* the code it describes lands — a staging branch would let 
 code drift, which is the exact failure that repo exists to prevent. Context changes are
 committed to `drovi` alongside the change they describe.
 
+It is also **private**, so branch protection is unavailable on the free plan. Its `drovi`
+branch is therefore unprotected — an accepted gap, not an oversight. See
+[github-setup.md](github-setup.md) Step 5.
+
 ### Merges go one way
 
 ```
