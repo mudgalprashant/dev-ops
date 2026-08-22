@@ -1,0 +1,15 @@
+# Real secrets — NEVER commit. Only .env.example (names, no values) is tracked.
+.env
+.env.*
+!.env.example
+
+# Local tunnel state / logs
+*.tunnel
+cloudflared.log
+ngrok.log
+
+# OS / editor cruft
+.DS_Store
+.idea/
+.vscode/
+*.swp
