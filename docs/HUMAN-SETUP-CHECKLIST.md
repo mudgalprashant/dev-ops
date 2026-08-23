@@ -59,7 +59,16 @@ Var reference: [env-matrix.md](./env-matrix.md) · Stack rationale: [free-stack.
      rely on that.
   4. **Project settings → General → Your apps → Add app → Web** (the app registers itself
      later). Copy the config values shown.
-- **Feeds:** backend `DROVI_FIREBASE_PROJECT_ID`, `DROVI_FIREBASE_CREDENTIALS_B64` (secret — the whole service-account JSON, base64'd, as one env var). The console will need the *publishable* Firebase web config, which is not a secret — but the console has no stack yet (decision I)
+- **Feeds:** backend `DROVI_FIREBASE_PROJECT_ID` — **and nothing else.**
+- 📌 **You do NOT need a service-account key.** Verifying an ID token needs only the project
+  id, because the token is an RS256 JWT signed with keys Google publishes (ADR-0006). Skip
+  any step that tells you to download `firebase-adminsdk-*.json`; there is nothing here to
+  keep secret.
+- 📌 The project id is on the Firebase console's **Project settings** page, and is the same
+  string the console's publishable web config uses.
+- **Verify:** with `DROVI_FIREBASE_PROJECT_ID` set, `GET /api/v1/me` with a real ID token
+  returns 200 and provisions an account. Without it, every console route returns 503
+  `AUTH_NOT_CONFIGURED` — which is the correct fail-closed state, not a misconfiguration
 - **Verify:** create a test user in the Firebase console → **Authentication → Users**.
 - **Blocks:** every authenticated endpoint, so effectively everything.
 
@@ -184,7 +193,7 @@ Generation is the product's headline feature and it cannot run without this.
 ## Completion gate
 
 - [ ] Supabase project exists; the **session pooler** URL is what you saved
-- [ ] Firebase project exists; a test user can be created; service-account JSON saved outside the repo
+- [ ] Firebase project exists; `DROVI_FIREBASE_PROJECT_ID` set (no service-account key needed)
 - [ ] `DROVI_ANTHROPIC_API_KEY` set, and **only then** `ai_provider_config.active = true`
 - [ ] Spend caps set in `app_config`, and you know how to hit the kill switch
 - [ ] `https://<service>.onrender.com/actuator/health` returns UP, with 2 migrations applied

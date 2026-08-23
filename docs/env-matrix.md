@@ -51,12 +51,24 @@ database backup is never a credential leak.
 active with no key fails every call at request time instead of at startup, which is the
 worse failure.
 
-### Identity — Firebase (**not yet wired**)
+### Identity — Firebase
 
 | Variable | Req in | Secret | Verify |
 | --- | --- | --- | --- |
-| `DROVI_FIREBASE_PROJECT_ID` | prod | | a valid ID token verifies; one from another project is rejected |
-| `DROVI_FIREBASE_CREDENTIALS_B64` | prod | ✅ | base64 of the service-account JSON; app starts without a credentials error |
+| `DROVI_FIREBASE_PROJECT_ID` | prod | **no** | `GET /api/v1/me` with a valid ID token returns 200; one minted for another Firebase project is rejected |
+
+**One variable, and it is not a secret.** Verifying a Firebase ID token needs no
+service-account credential: the token is an RS256 JWT and Google publishes the signing keys
+as a JWK set (ADR-0006). `DROVI_FIREBASE_CREDENTIALS_B64` is **retired** — delete it
+wherever it is set.
+
+⚠️ **Absence is meaningful.** With no project id there is no token decoder, and every
+console route returns `AUTH_NOT_CONFIGURED` (503). That is the intended fail-closed state,
+not a bug. Sandboxes are unaffected — they authenticate with project API keys.
+
+⚠️ **A wrong project id does not fail loudly.** Tokens from your real project will simply be
+rejected as having the wrong audience, which looks like "my login is broken". Check this
+value first when authentication mysteriously fails.
 
 ## Console — drovi-frontend (Next.js, not yet built)
 
@@ -83,7 +95,8 @@ Gradle dependency.
 These belonged to the flight-alerts product and mean nothing now. If you find one set
 anywhere, remove it:
 
-`DROVI_AERODATABOX_BASE_URL`, `DROVI_AERODATABOX_API_KEY`, `DROVI_WEBHOOK_PUBLIC_BASE_URL`,
+`DROVI_FIREBASE_CREDENTIALS_B64` (retired 2026-08-23 by ADR-0006 — verification needs only
+the project id), `DROVI_AERODATABOX_BASE_URL`, `DROVI_AERODATABOX_API_KEY`, `DROVI_WEBHOOK_PUBLIC_BASE_URL`,
 `DROVI_VENDOR_WEBHOOK_TOKEN`, `DROVI_VENDOR_WEBHOOK_SECRET`, `DROVI_EXPO_ACCESS_TOKEN`,
 `DROVI_REDIS_URL`, `DROVI_REDIS_PASSWORD`, `DROVI_JWT_SIGNING_KEY`, `DROVI_JWT_KEY_ID`,
 `DROVI_ACCESS_TOKEN_TTL`, `DROVI_REFRESH_TOKEN_TTL`, `DROVI_EMAIL_*`, `DROVI_SMS_*`.
