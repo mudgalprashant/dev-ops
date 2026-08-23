@@ -38,11 +38,11 @@ without a paid add-on; transaction mode (6543) has no prepared statements, which
 and Flyway both need; and Flyway's advisory lock is connection-scoped. **Session mode,
 port 5432.**
 
-### Model provider — Anthropic
+### Model provider — Google Gemini
 
 | Variable | Req in | Secret | Verify |
 | --- | --- | --- | --- |
-| `DROVI_ANTHROPIC_API_KEY` | prod | ✅ | a generation completes and writes an `ai_call` row with `status = 'OK'` |
+| `DROVI_GEMINI_API_KEY` | prod | ✅ | a generation completes and writes an `ai_call` row with `status = 'OK'` |
 
 The base URL, model, auth header name and max output tokens are **columns in
 `ai_provider_config`**, not env vars — switching provider or model must be an `UPDATE`, not
@@ -106,6 +106,73 @@ the project id), `DROVI_AERODATABOX_BASE_URL`, `DROVI_AERODATABOX_API_KEY`, `DRO
 `DROVI_JWT_SIGNING_KEY` deserves a specific note: Drovi no longer mints tokens at all
 (#7). If one exists, it is an unused credential that can only ever be a liability —
 delete it rather than rotating it.
+
+## Where each value comes from
+
+Every value, where to click for it, and what it looks like. **All examples below are
+fabricated** — they show the shape, not a real credential.
+
+### `DROVI_DB_URL` · `DROVI_DB_USERNAME` · `DROVI_DB_PASSWORD`
+
+**Supabase** → your project → **Connect** (top bar) → **Session pooler**.
+
+```
+DROVI_DB_URL=jdbc:postgresql://aws-0-ap-south-1.pooler.supabase.com:5432/postgres?sslmode=require
+DROVI_DB_USERNAME=postgres.abcdefghijklmnopqrst
+DROVI_DB_PASSWORD=<the password you chose when creating the project>
+```
+
+- The host **must** contain `pooler.supabase.com` and the port **must** be `5432`. If you
+  see `6543`, you copied transaction mode — it has no prepared statements and Flyway breaks.
+  If you see `db.<ref>.supabase.co`, you copied the direct connection — it is IPv6-only.
+- The username is literally `postgres.` + your project ref. The project ref is also the
+  random-looking part of your Supabase dashboard URL.
+- Supabase gives you a **libpq** URL (`postgresql://…`). Ours is **JDBC**
+  (`jdbc:postgresql://…`) — prepend `jdbc:` and drop any embedded `user:password@`.
+- The password is shown **once**, when the project is created. Lost it? Supabase →
+  **Settings → Database → Reset database password**.
+
+### `DROVI_FIREBASE_PROJECT_ID`
+
+**Firebase console** → ⚙️ **Project settings** → **General** → **Project ID**.
+
+```
+DROVI_FIREBASE_PROJECT_ID=drovi-4f21a
+```
+
+- The **Project ID**, not the display name — they differ whenever your preferred name was
+  taken, and Firebase silently appends a suffix.
+- **Not a secret.** It ships in every web client's config.
+- No service-account key is needed (ADR-0006). Ignore any guide telling you to download
+  `firebase-adminsdk-*.json`.
+
+### `DROVI_GEMINI_API_KEY`
+
+**Google AI Studio** → <https://aistudio.google.com/apikey> → **Create API key**.
+
+```
+DROVI_GEMINI_API_KEY=AIzaSyEXAMPLE-not-a-real-key-000000000000
+```
+
+- Google API keys begin `AIza` and are ~39 characters.
+- No credit card. The free tier is 15 req/min and 1,500 req/day.
+- ⚠️ **The free tier uses your content to improve Google's products, and humans may read
+  it.** Fine for development; move to paid before real users' data flows through
+  generation. See ADR-0008.
+- **This is a real secret.** Render dashboard or shell session — never a file in a repo.
+
+### `DROVI_PUBLIC_BASE_URL`
+
+**Render** → your service → the URL shown at the top of the page.
+
+```
+DROVI_PUBLIC_BASE_URL=https://drovi-backend.onrender.com
+```
+
+- **Origin only — no trailing slash and no path.** It is what project base URLs are built
+  from (`<origin>/s/<projectKey>`), so a wrong value ends up pasted into every user's
+  codebase.
+- Locally: `http://localhost:8080`.
 
 ## Rules
 

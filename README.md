@@ -47,6 +47,6 @@ Application code, and the app repos' own docs.
 | Deployed environments | **None.** `render.yaml` is ready; nothing has been deployed |
 | Supabase project | Does not exist — human task |
 | Firebase project | Does not exist — human task |
-| Anthropic API key | Not set — human task; generation cannot run without it |
+| Gemini API key | Not set — human task; generation cannot run without it |
 
 Canonical cross-repo decisions: `global-context` branch `drovi`, `shared/decisions.md`.

@@ -17,7 +17,7 @@ flowchart LR
     DEV[Developer's app<br/>under test] -->|HTTPS 443<br/>/s/&lt;projectKey&gt;/…| BE
     CONSOLE[Console — not built] -->|HTTPS 443<br/>/api/v1/…| BE
     BE[drovi-backend<br/>Render free web service] -->|TCP 5432 TLS<br/>Supavisor SESSION pooler| PG[(Supabase Postgres)]
-    BE -->|HTTPS 443| AI[Anthropic API]
+    BE -->|HTTPS 443| AI[Gemini API]
     BE -->|HTTPS 443| FB[Firebase — token verification, not wired]
     CRON[Supabase pg_cron<br/>every 5 min] -->|GET /actuator/health| BE
 ```

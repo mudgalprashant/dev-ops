@@ -167,7 +167,7 @@ Pattern: publish new alongside old → switch → revoke old.
 
 | Secret | Where |
 | --- | --- |
-| `DROVI_ANTHROPIC_API_KEY` | Anthropic console → add a key → update Render → restart → revoke the old |
+| `DROVI_GEMINI_API_KEY` | Google AI Studio → add a key → update Render → restart → revoke the old |
 | `DROVI_DB_PASSWORD` | Supabase → reset → update Render → restart |
 | Firebase service account | Firebase console → new key → update Render → restart → delete the old |
 

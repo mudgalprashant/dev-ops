@@ -45,7 +45,7 @@ and nobody can reproduce a local run.
 | Value | Secret? | Why |
 | --- | --- | --- |
 | `DROVI_DB_PASSWORD` | ✅ | full read/write over every tenant's data |
-| `DROVI_ANTHROPIC_API_KEY` | ✅ | metered spend with no natural ceiling |
+| `DROVI_GEMINI_API_KEY` | ✅ | metered spend with no natural ceiling |
 | `DROVI_DB_URL`, `DROVI_DB_USERNAME` | 🟡 | not secret alone, but they name the target — keep them beside the password |
 | `DROVI_FIREBASE_PROJECT_ID` | ❌ | **not a secret.** Verifying a Firebase ID token needs only the project id (ADR-0006); it is also visible in any web client's config |
 | `DROVI_PUBLIC_BASE_URL`, `DROVI_PORT`, `DROVI_LOG_LEVEL` | ❌ | plain configuration |
@@ -106,12 +106,12 @@ the whole class of "my machine got compromised" incidents:
 | Run the tests | nothing — they start their own Postgres | none |
 | Run the app against a local DB | a local Postgres you own | none worth protecting |
 | Exercise identity | `DROVI_FIREBASE_PROJECT_ID` | not a secret |
-| Exercise generation (Phase 3) | `DROVI_ANTHROPIC_API_KEY` | ✅ — use a **separate low-limit key**, never production's |
+| Exercise generation (Phase 3) | `DROVI_GEMINI_API_KEY` | ✅ — use a **separate low-limit key**, never production's |
 
 When you do need a value locally, put it in the **shell session**, not a file:
 
 ```bash
-export DROVI_ANTHROPIC_API_KEY=...      # this session only; gone when you close it
+export DROVI_GEMINI_API_KEY=...      # this session only; gone when you close it
 ./gradlew bootRun
 ```
 
@@ -132,7 +132,7 @@ same — *publish new alongside old → switch → revoke old.*
 
 | Secret | How |
 | --- | --- |
-| `DROVI_ANTHROPIC_API_KEY` | Anthropic console → create a second key → update Render → save (restarts) → verify a generation → revoke the old key |
+| `DROVI_GEMINI_API_KEY` | Google AI Studio → create a second key → update Render → save (restarts) → verify a generation → revoke the old key |
 | `DROVI_DB_PASSWORD` | Supabase → Settings → Database → Reset password → update Render → save. **Brief downtime** — Supabase free has one database user, so old and new cannot coexist. Accepted risk, recorded in `platform-security.md` |
 | A project API key (a user's) | the user issues a second key, switches their client, revokes the first. `project_api_key` allows several live keys per project precisely for this |
 | `DROVI_FIREBASE_PROJECT_ID` | not a secret; changing it means moving Firebase projects, not rotating |

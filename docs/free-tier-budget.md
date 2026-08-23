@@ -21,7 +21,7 @@ documentation and must be checked at signup.
 | **Source hosting** | **GitHub** (Free) | Unlimited private repos | ✅ |
 | **Error tracking** | **Sentry** (Developer) | 5,000 errors/month · 1 user | ⚠️ from memory |
 | **Uptime monitoring** | **UptimeRobot** (Free) | 50 monitors · 5-minute interval | ⚠️ from memory |
-| **Model inference** | **Anthropic** | **NOT FREE** — metered per token. The only per-use cost in the stack | ✅ |
+| **Model inference** | **Google Gemini** | **Free**: 15 req/min, 1,500 req/day, no card, no expiry. ⚠️ free-tier content is used to improve Google's products and may be read by humans — paid tier is not | ✅ |
 | **Console hosting** | **Render** or **Cloudflare Pages** | Free static/SSR hosting. **Not Vercel** — Hobby is non-commercial only (#29) | ✅ |
 
 ## Not used, and why
@@ -43,10 +43,11 @@ In the order we will actually hit them:
    without bound. Sandbox record data is capped per project by plan; the log is not
    capped by anything. Writing that purge is the single highest-value ops task
    outstanding.
-2. **Anthropic credits.** The only real money. Every control — the kill switch, the
-   platform and per-account daily caps, the per-call ledger, per-purpose model routing —
-   exists for this line. Unlike the others it can be exhausted in *minutes* by a loop,
-   which is why the caps live in the database rather than in config.
+2. **Gemini's 15 requests/minute.** Not a bill — a wall. A single sandbox generation is
+   many calls in sequence, so this is the limit most likely to interrupt real work. The
+   spend controls (kill switch, daily caps, per-call ledger, per-purpose routing) still
+   matter: they are what makes the move to the paid tier a decision rather than a surprise,
+   and on paid this line becomes the only per-use cost in the stack.
 3. **Render's 512 MB.** The tightest technical limit and the least proven. Heap is
    capped at 65% with SerialGC and C2 disabled. If it OOMs the fix is $7/month.
 4. **Render's 750 instance-hours.** 744 hours in a 31-day month, so staying awake fits —
