@@ -19,7 +19,7 @@ is named honestly below rather than hidden in a footnote.
 | Cache | **Caffeine**, in-JVM | Free | One instance, so an in-process cache has no network hop, no serialisation and nothing extra to keep alive. No Redis (#13) |
 | Scheduling | **In-process `@Scheduled`** + Supabase `pg_cron` keep-alive | Free | Always-on and single-instance. The 5-minute keep-alive (#30) prevents Render's idle spin-down: 744 h/month against a 750 h allowance |
 | Auth | **Firebase Authentication** | Free tier | Removes password hashing, token rotation, reuse detection and session storage from our scope entirely — a large amount of security-critical code we do not own. **Not yet wired** |
-| **Model provider** | **Anthropic** | **NOT FREE** | See below |
+| **Model provider** | **Google Gemini** | **Free tier — no card** | 15 req/min, 1,500 req/day. ⚠️ the free tier trains on your content — see below |
 | CI | **GitHub Actions** | Free (2 000 min/mo private) | |
 | Integration tests | **zonky embedded-postgres** | Free | Pulls a real Postgres binary as a Gradle dependency and runs it in-process. **No Docker, nothing to install.** The schema uses partial indexes, generated columns, `jsonb`, composite FKs and a trigger — none of which H2 implements |
 | Local Postgres | **Postgres.app**, only if you want one | Free | Not needed for tests |
@@ -27,11 +27,26 @@ is named honestly below rather than hidden in a footnote.
 | Uptime | **UptimeRobot** / **cron-job.org** free | Free | Also the keep-alive mechanism |
 | Console | **Next.js + React + TypeScript**, on **Render or Cloudflare** | Free tier | Not Vercel: its Hobby plan is non-commercial only (#29), so a paid tier would breach the terms. Decision #41 / ADR-0005 |
 
-## The one unavoidable cost
+## The one thing that can still cost money
 
-**Model inference is metered, and it is the only thing here that bills per use.** Research,
-spec synthesis and seed generation all consume tokens, and a runaway loop consumes them
-quickly.
+Gemini's free tier needs no card and does not expire, so nothing here bills today. That
+does **not** make the spend controls optional — the free tier is a rate limit, not a
+guarantee, and the day we move to paid (see the warning below) inference becomes the only
+per-use cost in the stack.
+
+**Two free-tier limits shape the design:**
+
+| | Free | Consequence |
+| --- | --- | --- |
+| 15 requests/minute | ⚠️ | generation is bursty — research → spec → seed is many calls in a row. The job runner must pace itself rather than fan out |
+| 1,500 requests/day | | comfortable for development |
+
+⚠️ **The free tier trains on your content.** Google's terms say content sent to the
+non-paid tier, and the responses, may be used to improve Google's products, and **human
+reviewers may read it**. Generation sends a user's prompts and whatever product docs they
+supply — which for a real customer may be an internal API. **Move to the paid tier before
+any real user's content passes through generation.** Fine on capability, wrong on terms —
+the same shape of problem as Vercel (#29). Recorded in ADR-0008.
 
 So the model provider is where every cost control goes:
 

@@ -83,12 +83,13 @@ Var reference: [env-matrix.md](./env-matrix.md) · Stack rationale: [free-stack.
 
 ## Do these before the generation slice
 
-### 3. Anthropic — the model provider
+### 3. Google Gemini — the model provider
 
 Generation is the product's headline feature and it cannot run without this.
 
-1. Create an API key at <https://console.anthropic.com/> → **API keys**.
-2. Set it as `DROVI_ANTHROPIC_API_KEY` — locally in `.env`, on Render in the dashboard.
+1. Go to <https://aistudio.google.com/apikey> → **Create API key**. No card is needed.
+   The key begins `AIza`.
+2. Set it as `DROVI_GEMINI_API_KEY` — locally in `.env`, on Render in the dashboard.
    It is **never** stored in the database; `ai_provider_config.api_key_env_var` records
    only the *name* of the variable, so a database backup is never a credential leak.
 3. Only then activate the provider:
@@ -111,9 +112,15 @@ Generation is the product's headline feature and it cannot run without this.
    The kill switch is `UPDATE app_config SET value='false' WHERE key='ai.enabled';` —
    it stops *spending*, never *serving*. Existing sandboxes keep answering.
 
-5. **Decide the model routing.** All six purposes currently route to `claude-opus-5`.
-   `ai.model.SEED` is the highest-volume purpose and the obvious first candidate to move
-   to a cheaper model. That is a cost/quality call only you can make.
+5. **Decide the model routing.** All six purposes route to `gemini-3.7-flash`.
+   `ai.model.SEED` is the highest-volume purpose and the obvious candidate for
+   `gemini-3.1-flash-lite`. That is a cost/quality call only you can make.
+- ⚠️ **The free tier trains on your content.** Google may use non-paid-tier content and
+  responses to improve its products, and human reviewers may read them. Fine while you are
+  the only user; **move to the paid tier before any real customer's material passes through
+  generation.** See ADR-0008.
+- ⚠️ **15 requests per minute.** A single sandbox generation is many calls in sequence, so
+  this is the limit you will hit first — not the daily one.
 
 
 ## Do these before deploying
@@ -128,7 +135,7 @@ Generation is the product's headline feature and it cannot run without this.
      `render.yaml` and proposes the service — no dashboard configuration to get
      wrong.
   3. It will prompt for each `sync: false` secret. Paste the values from your
-     `.env` (`DROVI_DB_*`, `DROVI_FIREBASE_*`, `DROVI_ANTHROPIC_API_KEY`).
+     `.env` (`DROVI_DB_*`, `DROVI_FIREBASE_*`, `DROVI_GEMINI_API_KEY`).
   4. **Apply.** The first build takes a while — it compiles the jar inside the
      image on a small instance.
 - **Feeds:** `DROVI_PUBLIC_BASE_URL` — the assigned `https://drovi-backend.onrender.com`
@@ -201,7 +208,7 @@ Generation is the product's headline feature and it cannot run without this.
 
 - [ ] Supabase project exists; the **session pooler** URL is what you saved
 - [ ] Firebase project exists; `DROVI_FIREBASE_PROJECT_ID` set (no service-account key needed)
-- [ ] `DROVI_ANTHROPIC_API_KEY` set, and **only then** `ai_provider_config.active = true`
+- [ ] `DROVI_GEMINI_API_KEY` set, and **only then** `ai_provider_config.active = true`
 - [ ] Spend caps set in `app_config`, and you know how to hit the kill switch
 - [ ] `https://<service>.onrender.com/actuator/health` returns UP, with 2 migrations applied
 - [ ] `pg_cron` keep-alive scheduled and succeeding
