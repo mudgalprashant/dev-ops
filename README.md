@@ -14,6 +14,7 @@ history-reset on 2026-08-23 (decisions #31, #42). Nothing of that product surviv
 | --- | --- |
 | `.env.example` | The full env-var contract — **names only, never values** |
 | `docs/env-matrix.md` | Every var: which app, which env, how to verify |
+| `docs/secrets.md` | **Where secrets live, how to set them, how to rotate them** |
 | `docs/free-stack.md` | What we use for each concern, and what it costs |
 | `docs/free-tier-budget.md` | Quantified headroom — what runs out first |
 | `docs/HUMAN-SETUP-CHECKLIST.md` | **Everything the human must do by hand**, ordered |

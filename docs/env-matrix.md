@@ -9,6 +9,8 @@ last_updated: 2026-08-22
 Every variable, which app needs it, whether it is a secret, and **how to verify it is
 right**. Names only — never a value, in this file or any other.
 
+Where the secret values actually live, and how to rotate them: **[secrets.md](secrets.md)**.
+
 Authority for what the backend actually reads: `drovi-backend/src/main/resources/application.yaml`
 and `render.yaml`.
 

@@ -9,8 +9,10 @@ last_updated: 2026-08-22
 **Everything a person must do by hand.** Agents cannot create accounts, provision hosts,
 spend money, or invent secret values.
 
-Never paste a value into a doc, a commit, or a chat. Values go in `.env` locally, or the
-platform / GitHub secret store for hosted.
+Never paste a value into a doc, a commit, or a chat. **Where each secret lives and how to
+rotate it: [secrets.md](secrets.md).** In short: production values go in the Render
+dashboard, CI values go in a GitHub *Environment*, and production credentials never land on
+a laptop.
 
 Legend: **Feeds** = the env var this produces · **Verify** = how to confirm it worked ·
 **Blocks** = what stays broken until it is done.
@@ -33,8 +35,9 @@ Var reference: [env-matrix.md](./env-matrix.md) · Stack rationale: [free-stack.
 - **Feeds:** `DROVI_DB_URL`, `DROVI_DB_USERNAME`, `DROVI_DB_PASSWORD`
 - ⚠️ **Take the SESSION pooler (port 5432), not the direct connection and not
   transaction mode (6543).** All three appear in that dialog and only one works:
-  - **Direct** is IPv6-only unless you buy the IPv4 add-on. Northflank has no IPv6
-    egress, so this fails to connect and the error reads like a firewall problem.
+  - **Direct** is IPv6-only unless you buy the IPv4 add-on. Most container hosts,
+    Render included, have no IPv6 egress — so this fails to connect and the error reads
+    like a firewall problem rather than an addressing one.
   - **Transaction mode (6543)** does not support prepared statements. Hibernate and
     Flyway both use them, and Flyway's migration lock is connection-scoped, so
     migrations can deadlock or half-apply.
@@ -53,23 +56,27 @@ Var reference: [env-matrix.md](./env-matrix.md) · Stack rationale: [free-stack.
      Analytics (we use Sentry).
   2. **Build → Authentication → Get started.** Enable **Email/Password**. Enable **Google**
      if you want social sign-in.
-  3. **Project settings → Service accounts → Generate new private key.** This downloads a
-     JSON file. **This file is a full admin credential — it is not a config file.** Save it
-     outside the repo. `.gitignore` already blocks `firebase-adminsdk-*.json`, but do not
-     rely on that.
-  4. **Project settings → General → Your apps → Add app → Web** (the app registers itself
-     later). Copy the config values shown.
+  3. **Project settings → General.** Copy the **Project ID** (not the project *name* —
+     they differ once a name is taken, e.g. `drovi-4f21`). That single value is all the
+     backend needs.
+  4. **Do NOT generate a service-account key.** There is nothing here to download and
+     nothing to keep secret — see the note below.
+  5. Create a test user: **Authentication → Users → Add user**. You will need one to get a
+     real ID token and see `GET /api/v1/me` return 200.
 - **Feeds:** backend `DROVI_FIREBASE_PROJECT_ID` — **and nothing else.**
 - 📌 **You do NOT need a service-account key.** Verifying an ID token needs only the project
   id, because the token is an RS256 JWT signed with keys Google publishes (ADR-0006). Skip
   any step that tells you to download `firebase-adminsdk-*.json`; there is nothing here to
   keep secret.
-- 📌 The project id is on the Firebase console's **Project settings** page, and is the same
-  string the console's publishable web config uses.
+- 📌 The project id is **not a secret**. It appears in every web client's config and is
+  safe in a dashboard, a log or a screenshot. Set it in Render like any other variable.
+- ⚠️ A **wrong** project id fails quietly: real tokens are rejected as having the wrong
+  audience, which reads like "my login is broken". Check this value first.
 - **Verify:** with `DROVI_FIREBASE_PROJECT_ID` set, `GET /api/v1/me` with a real ID token
-  returns 200 and provisions an account. Without it, every console route returns 503
-  `AUTH_NOT_CONFIGURED` — which is the correct fail-closed state, not a misconfiguration
-- **Verify:** create a test user in the Firebase console → **Authentication → Users**.
+  returns 200 and provisions an account. Without it every console route returns 503
+  `AUTH_NOT_CONFIGURED` — the correct fail-closed state, not a misconfiguration.
+- **Blocks:** every console endpoint. Sandboxes are unaffected — they authenticate with
+  project API keys, not Firebase tokens.
 - **Blocks:** every authenticated endpoint, so effectively everything.
 
 ---
