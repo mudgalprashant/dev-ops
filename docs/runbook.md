@@ -20,6 +20,79 @@ waiting for a build.
 
 ---
 
+## First deploy: the four failures, in the order they happen
+
+Every one of these was hit for real on 2026-08-23. Each looks like a different problem
+than it is, which is why they are written down rather than left to be rediscovered.
+
+The application now **fails fast with an explanatory message** for the first two, and a test
+guards the third. This section explains what to look for if you meet them anyway — on a new
+environment, or from an older image.
+
+### 1. `'url' must start with "jdbc"`
+
+`DROVI_DB_URL` holds a **libpq** URL. Supabase shows you that form; Spring needs JDBC.
+
+```
+✗ postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
+✓ jdbc:postgresql://aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require
+```
+
+Prepend `jdbc:`, delete the `<user>:<password>@` part. Reads like a Flyway bug because the
+throw happens inside Flyway's initialisation.
+
+### 2. `password authentication failed for user "postgres"`
+
+**Read the username in that message.** If it says `postgres` rather than
+`postgres.<project-ref>`, the password is not the problem — `DROVI_DB_USERNAME` never
+reached the app, and `application.yaml`'s local-development default took over.
+
+Set both, exactly:
+
+```
+DROVI_DB_USERNAME=postgres.<project-ref>
+DROVI_DB_PASSWORD=<the Supabase database password>
+```
+
+Supabase's session pooler requires the project ref in the username. Lost the password?
+Supabase → **Settings → Database → Reset database password**.
+
+### 3. `Found non-empty schema(s) "public" but no schema history table`
+
+Supabase's `public` schema is **not empty** on a new project, and Flyway will not migrate
+into an occupied schema without a baseline.
+
+Fixed in `application.yaml`: `baseline-on-migrate: true` **and `baseline-version: 0`**.
+
+⚠️ The second line is the load-bearing one. `baseline-version` defaults to **1**, and Flyway
+applies only migrations *above* the baseline — so at the default, `V1__baseline` is silently
+skipped. Flyway reports success, the app starts, and the first symptom is Hibernate
+complaining about a missing table, which points nowhere near this setting.
+
+### 4. `No open ports detected`
+
+Not a port problem. It is Render still scanning while the app dies during startup — always
+a **symptom**, never the cause. Scroll up for the real exception.
+
+### Verifying a good deploy
+
+```bash
+curl https://drovi-backend.onrender.com/actuator/health
+# {"status":"UP"}
+```
+
+`UP` means Flyway applied all three migrations against Supabase and Hibernate validated the
+schema — the strongest single signal that the deployment is genuinely working.
+
+Then confirm the migrations landed:
+
+```sql
+SELECT version, description, success FROM flyway_schema_history ORDER BY installed_rank;
+-- expect versions 1, 2 and 3, all success = true
+```
+
+---
+
 ## Incident: model spend is running away
 
 **Severity 1.** This is the fastest way to lose real money in this system.
