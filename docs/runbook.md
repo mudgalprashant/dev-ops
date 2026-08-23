@@ -33,8 +33,20 @@ waiting for a build.
    This fails new generations closed with `CAPPED`. It does **not** stop sandboxes
    serving — existing projects keep working, so users are inconvenienced, not broken.
 
-   ⚠️ The value is cached in-process for up to 10 minutes. If the running instance has not
-   picked it up, restart the service from Render — a restart is cheap and certain.
+   ⚠️ **Today this takes effect on the very next model call**, because caching is not
+   actually enabled in the application — nothing declares `@EnableCaching`, so
+   `AppConfigService`'s `@Cacheable` is inert (`drovi-backend` thread Q). Do not rely on
+   that: it is an accident, not a design, and the moment Q is resolved by enabling caching
+   the value is cached in-process for up to 10 minutes.
+
+   Either way the safe move is unchanged — **verify, then restart if in doubt.** A restart
+   from Render is cheap and certain:
+
+   ```sql
+   -- Proof it took: a call attempted after the UPDATE is ledgered as CAPPED.
+   SELECT status, count(*) FROM ai_call
+    WHERE created_at > now() - interval '5 minutes' GROUP BY 1;
+   ```
 
 2. **See where it went.**
 
@@ -54,6 +66,16 @@ waiting for a build.
 4. **Common causes**, in order of likelihood: a retry loop on unparseable model output
    (`ai.max.attempts` too high); one account seeding enormous projects; a purpose routed
    to a more expensive model than intended.
+
+   The `status` column narrows it fast — the ledger records refusals, not just successes:
+
+   | Mostly | Read it as |
+   | --- | --- |
+   | `OK` | genuine usage. Look at `purpose` and the account, not at a bug |
+   | `ERROR` | a retry loop. Each attempt is billed for its input tokens; lower `ai.max.attempts` |
+   | `TIMEOUT` | the provider is slow and we gave up — **these may still have been billed** |
+   | `REFUSED` | something is retrying a refusal, which spends money to be told no again. That is a bug |
+   | `CAPPED` | the controls are already holding. Nothing was sent; spend is not from these |
 
 5. **Re-enable with a lower cap**, not with the same one:
 
