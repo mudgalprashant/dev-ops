@@ -1,0 +1,25 @@
+name: PR guard
+
+# dev-ops is a shared repo with one branch per project, so its RELEASE branch is
+# `drovi`, not `main`. Otherwise identical to the product repos: GitHub cannot
+# restrict who opens a PR, only who merges, so this check is the substitute.
+
+on:
+  pull_request:
+    branches: [drovi]
+
+permissions:
+  contents: read
+
+jobs:
+  release-prs-come-from-dev:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Only `dev` may target `drovi`
+        run: |
+          echo "head: ${{ github.head_ref }}  →  base: ${{ github.base_ref }}"
+          if [ "${{ github.head_ref }}" != "dev" ]; then
+            echo "::error::A pull request into 'drovi' may only come from 'dev'."
+            exit 1
+          fi
+          echo "OK — release PR from dev."

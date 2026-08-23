@@ -1,59 +1,103 @@
 ---
 title: Branching strategy
 status: current
-last_updated: 2026-08-21
+last_updated: 2026-08-23
 applies_to: [drovi-backend, drovi-frontend, dev-ops, global-context]
+authority: this file is canonical; other repos link here rather than restate it
 ---
 
 # Branching strategy
 
-Two kinds of repo live in this project, and they need opposite rules.
+## The rules, in one place
 
-- **Product repos** — `drovi-backend`, `drovi-frontend`. One product each. Normal
-  trunk-based flow.
-- **Shared repos** — `dev-ops`, `global-context`. These serve *other projects too*.
-  Drovi content must never reach a branch another project reads.
+1. **Never commit directly to `main`.** Not a fix, not a typo, not a "quick" revert.
+2. **Never open a PR into `main` except the release PR from `dev`.**
+3. **All work happens on `feat/<feature-name>` or `fix/<fix-name>`, branched from `dev`.**
+4. **PRs are raised into `dev`.**
+5. **When `dev` is live and stable, one PR is raised `dev` → `main`, and the human decides
+   the merge.** No agent merges to `main`, ever.
+
+Everything below is detail.
 
 ---
 
 ## Product repos — `drovi-backend`, `drovi-frontend`
 
 ```
-main                    deployable. tagged. protected.
- └── dev                integration. everything lands here via PR + green CI. protected.
-      ├── feat/<slice>  one vertical slice, short-lived
-      ├── fix/<thing>
-      └── chore/<thing>
+main                     release. protected. the human alone merges here.
+ └── dev                 integration. everything lands here via PR + green CI.
+      ├── feat/<name>    one vertical slice, short-lived
+      └── fix/<name>     one defect, short-lived
 ```
 
-**Rules**
+### Flow
+
+```bash
+git checkout dev && git pull
+git checkout -b feat/sandbox-generation
+# …work, commit…
+git push -u origin feat/sandbox-generation
+# open a PR into dev
+```
+
+### Rules
 
 | Rule | Why |
 | --- | --- |
 | Branch off `dev`, PR into `dev`, squash-merge, delete the branch | Keeps `dev` history one line per slice, so `git log --oneline` reads as a changelog |
 | Never commit directly to `dev` or `main` | CI is the gate; a direct push skips it |
-| `dev` → `main` only when a slice is genuinely deployable — merge commit, then tag `v0.x.y` | `main` answers "what is running in production", nothing else |
+| `dev` → `main` is a **release PR**, opened only when `dev` is genuinely live and stable. Merge commit, then tag `v0.x.y` | `main` answers "what is running in production", and nothing else |
+| **Only the human merges `dev` → `main`** | It is a release decision, not an engineering one |
 | A branch name states the *slice*, not the file — `feat/sandbox-generation`, not `feat/add-entity` | A slice that cannot be named in three words is too big |
-| Rebase your branch on `dev` before opening the PR; never rebase after review starts | Reviewers lose their place when history moves under them |
-
-**Supersedes** shared decision #6 ("no branch is merged to `main` in any repo"). That
-was a reasonable holding position while nothing was deployable. It stops being reasonable
-the moment something is: with no promotion path, `dev` becomes both the integration branch
-and the release branch, and there is then no way to hotfix production without shipping
-whatever else is half-done on `dev`.
+| Rebase on `dev` before opening the PR; never rebase after review starts | Reviewers lose their place when history moves under them |
+| A hotfix is still `fix/<name>` off `dev` | If `dev` is too unstable to release from, that is the problem to fix — not a reason to bypass it |
 
 ---
 
 ## Shared repos — `dev-ops`, `global-context`
 
+These serve **other projects too**, so they carry one long-lived branch per project.
+Drovi content must never reach a branch another project reads.
+
 ```
-main                     cross-project content ONLY
- ├── drovi               long-lived. ALL drovi content.
- │    └── drovi/<topic>  short-lived, for a change too big for one commit
- └── <other-project>     same shape, one branch per project
+dev-ops
+ ├── drovi              release line for the drovi project  ← plays main's role
+ │    └── dev           integration for drovi
+ │         ├── feat/<name>
+ │         └── fix/<name>
+ └── <other-project>    same shape
+
+global-context
+ └── drovi              the drovi project's context (see the exception below)
 ```
 
-**The one rule that matters: merges go one way.**
+### The mapping, stated explicitly
+
+In `dev-ops`, **`drovi` is the release branch** — it plays exactly the role `main` plays in
+a product repo. `dev` is its integration branch. So the five rules read:
+
+| Product repo | `dev-ops` |
+| --- | --- |
+| `main` | `drovi` |
+| `dev` | `dev` |
+| `feat/…`, `fix/…` | same |
+
+⚠️ **Revisit this when a second project lands in `dev-ops`.** A single unqualified `dev`
+branch is unambiguous only while `drovi` is the only project. The second project needs
+`<project>-dev`, or `dev` needs renaming to `drovi-dev` at that point.
+
+### `global-context` is deliberately excluded
+
+`global-context` has **no `dev` branch**. Its content is compressed context that must be
+correct *the moment* the code it describes lands — a staging branch would let context and
+code drift, which is the exact failure that repo exists to prevent. Context changes are
+committed to `drovi` alongside the change they describe.
+
+It is also **private**, so branch protection is unavailable on the free plan. Its `drovi`
+branch is therefore unprotected — an accepted gap, not an oversight. See
+[github-setup.md](github-setup.md) Step 5.
+
+### Merges go one way
 
 ```
 main ──────────────▶ drovi          ALLOWED  (pick up shared conventions)
@@ -61,52 +105,65 @@ drovi ─────────✗───▶ main           NEVER    (leaks 
 drovi ─────────✗───▶ <other>        NEVER
 ```
 
-**Rules**
-
 | Rule | Why |
 | --- | --- |
-| `drovi` is **never** merged into `main` | `main` is what a *new* project branches from. One drovi-specific env var landing there and every future project inherits it |
-| Content genuinely useful to every project is committed **to `main` directly**, then picked up with `git merge main` into `drovi` | Makes the direction explicit. If you find yourself wanting to merge upward, you wrote it on the wrong branch |
-| A new project branches from `main`, never from `drovi` | Same reason |
-| Forward-merge `main` into `drovi` whenever `main` moves | Otherwise the project branches quietly drift off the shared baseline and nobody notices for months |
-| If something on `drovi` turns out to be generic, **rewrite it onto `main`** rather than cherry-picking | Cherry-picking carries drovi's framing with it. Generic content should read as generic |
+| A project branch is **never** merged into `main` | `main` is what a *new* project branches from. One drovi-specific env var landing there and every future project inherits it |
+| Content genuinely useful to every project is committed **to `main` directly**, then picked up with `git merge main` | If you find yourself wanting to merge upward, you wrote it on the wrong branch |
+| A new project branches from `main`, never from a project branch | Same reason |
+| Forward-merge `main` into a project branch whenever `main` moves | Otherwise project branches quietly drift off the shared baseline |
 
 **Why one branch per project instead of one repo per project:** the shared content
-(conventions, security baseline, glossary) is small and changes rarely, but it must stay
-identical everywhere. In separate repos it would be copy-pasted and diverge within a
-month. On branches, `git merge main` keeps it honest and the divergence is visible in
-one command.
+(conventions, security baseline, glossary) is small and changes rarely, but must stay
+identical everywhere. In separate repos it would be copy-pasted and diverge within a month.
+On branches, `git merge main` keeps it honest and the divergence is visible in one command.
 
 ---
 
 ## Working across repos
 
-A change that spans repos (contract change, new env var, new secret) needs its branches
-named identically in each repo it touches, and the PRs cross-linked. Land them in this
-order, because each depends on the one before:
+A change spanning repos (a contract change, a new env var, a new secret) uses **the same
+branch name in every repo it touches**, with the PRs cross-linked. Land them in this order,
+because each depends on the one before:
 
 1. `global-context` — the contract or decision, on `drovi`
-2. `dev-ops` — env vars, CI, deployment, on `drovi`
-3. `drovi-backend` — the server side, on `feat/<slice>`
-4. `drovi-frontend` — the client side, on `feat/<slice>`
+2. `dev-ops` — env vars, CI, deployment, on `feat/<name>` → `dev`
+3. `drovi-backend` — the server side, on `feat/<name>` → `dev`
+4. `drovi-frontend` — the client side, on `feat/<name>` → `dev`
 
 **The API contract is the interlock.** `global-context/shared/api-contract.md` is
-authoritative. A `frozen` endpoint may not change shape without a new version and a note
-in that file — the app is allowed to build against `frozen` and will break otherwise.
+authoritative. A change to either boundary updates it in the same change, or released
+clients break silently.
+
+---
+
+## Branch protection
+
+The rules above are convention until GitHub enforces them. **Step-by-step setup:
+[github-setup.md](github-setup.md)** — visibility, default branch, protection rules, and
+how to verify each control actually works.
+
+Two things worth knowing before you read it:
+
+- **GitHub cannot restrict who *opens* a PR**, only who merges. `.github/workflows/pr-guard.yml`
+  is the substitute: as a required status check, it blocks any PR into the release branch
+  that did not come from `dev`.
+- **"Only I can merge" comes from not granting write access**, not from a checkbox. These
+  are personal repos, so contributors fork — and a fork PR cannot be merged by its author.
+
+⚠️ Until this is configured, nothing stops a direct push. Convention is not a control.
 
 ---
 
 ## Quick reference
 
 ```bash
-# product repo — start a slice
-git checkout dev && git pull && git checkout -b feat/sandbox-generation
+# start a slice (product repo, or dev-ops)
+git checkout dev && git pull && git checkout -b feat/<name>
 
-# shared repo — start drovi work
-git checkout drovi && git pull
+# start a fix
+git checkout dev && git pull && git checkout -b fix/<name>
 
-# shared repo — pick up a change made on main
-git checkout drovi && git merge main
+# release: open a PR dev → main (or dev → drovi in dev-ops). The HUMAN merges it.
 
 # shared repo — add something every project should have
 git checkout main && <edit> && git commit && git checkout drovi && git merge main

@@ -20,7 +20,8 @@ history-reset on 2026-08-23 (decisions #31, #42). Nothing of that product surviv
 | `docs/deployment.md` | How the backend reaches Render |
 | `docs/runbook.md` | Deploy, rollback, rotate a secret, incidents |
 | `docs/observability.md` | Logs, metrics, alerts, and how to trace one sandbox call |
-| `docs/branching-strategy.md` | Branch model across the repos |
+| `docs/branching-strategy.md` | **Canonical branch model across all repos** — never commit to `main` |
+| `docs/github-setup.md` | Making the rules real: visibility, default branch, branch protection |
 | `ci/backend-ci.yml`, `ci/backend-deploy.yml` | GitHub Actions, authored here |
 
 The product roadmap is canonical in `drovi-backend/docs/00-overview/roadmap.md`.
