@@ -10,6 +10,29 @@ Every procedure here assumes you can reach the Supabase SQL editor and the Rende
 dashboard. Most controls are **database rows**, deliberately, so you can act without
 waiting for a build.
 
+## The alert lines
+
+The service emits `alert.*` lines at WARN when a limit is being **approached** — every other
+control announces itself only by refusing somebody. There is nothing scraping this service, so
+these are the signal, and they are what a log-based alert in Render should key on:
+
+| Line | Meaning | Procedure |
+| --- | --- | --- |
+| `alert.spend` | today's model spend is nearing `ai.daily.cost.cap.micros` | [model spend is running away](#incident-model-spend-is-running-away) |
+| `alert.storage` | stored sandbox data is nearing `watch.storage.budget.mb` | [the database is filling up](#incident-the-database-is-filling-up) |
+| `alert.unmatchedRoutes` | too many sandbox calls matched no endpoint | [generated routes do not match](#incident-generated-routes-do-not-match) |
+
+Each line carries an `action=runbook:…` naming its procedure, and the thresholds are
+`app_config` rows (`watch.*`) so they change without a deploy. `watch.enabled = false` silences
+all of them — which silences the *warning*, not the limit.
+
+**Every log line carries a correlation id** in brackets. For a request it is the id returned to
+the caller in `X-Correlation-Id` and quoted in the error body; for a generation it is the
+`generation_job.id`. Grep it.
+
+Set `LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs` to get JSON lines with the MDC as fields, if
+something is parsing them.
+
 ## Ownership — which runbook
 
 | Symptom | Here | Elsewhere |
@@ -106,8 +129,20 @@ SELECT version, description, success FROM flyway_schema_history ORDER BY install
    This fails new generations closed with `CAPPED`. It does **not** stop sandboxes
    serving — existing projects keep working, so users are inconvenienced, not broken.
 
-   ⚠️ The value is cached in-process for up to 10 minutes. If the running instance has not
-   picked it up, restart the service from Render — a restart is cheap and certain.
+   ⚠️ **Today this takes effect on the very next model call**, because caching is not
+   actually enabled in the application — nothing declares `@EnableCaching`, so
+   `AppConfigService`'s `@Cacheable` is inert (`drovi-backend` thread Q). Do not rely on
+   that: it is an accident, not a design, and the moment Q is resolved by enabling caching
+   the value is cached in-process for up to 10 minutes.
+
+   Either way the safe move is unchanged — **verify, then restart if in doubt.** A restart
+   from Render is cheap and certain:
+
+   ```sql
+   -- Proof it took: a call attempted after the UPDATE is ledgered as CAPPED.
+   SELECT status, count(*) FROM ai_call
+    WHERE created_at > now() - interval '5 minutes' GROUP BY 1;
+   ```
 
 2. **See where it went.**
 
@@ -127,6 +162,16 @@ SELECT version, description, success FROM flyway_schema_history ORDER BY install
 4. **Common causes**, in order of likelihood: a retry loop on unparseable model output
    (`ai.max.attempts` too high); one account seeding enormous projects; a purpose routed
    to a more expensive model than intended.
+
+   The `status` column narrows it fast — the ledger records refusals, not just successes:
+
+   | Mostly | Read it as |
+   | --- | --- |
+   | `OK` | genuine usage. Look at `purpose` and the account, not at a bug |
+   | `ERROR` | a retry loop. Each attempt is billed for its input tokens; lower `ai.max.attempts` |
+   | `TIMEOUT` | the provider is slow and we gave up — **these may still have been billed** |
+   | `REFUSED` | something is retrying a refusal, which spends money to be told no again. That is a bug |
+   | `CAPPED` | the controls are already holding. Nothing was sent; spend is not from these |
 
 5. **Re-enable with a lower cap**, not with the same one:
 
@@ -190,14 +235,79 @@ Symptoms: `HikariPool-1 - Connection is not available`, timeouts under light loa
 
 ## Incident: generations are stuck
 
-`generation_job` rows sitting in `RUNNING`. ⚠️ **The sweeper is not written**, so nothing
-reclaims them automatically.
+`generation_job` rows sitting in `RUNNING`. **The sweeper now handles this**, so before
+touching anything, check whether it is running.
+
+A stranded job is not merely untidy: it leaves its project `GENERATING`, and **a GENERATING
+project does not serve**. Someone's sandbox is dark until the job is resolved.
+
+```sql
+-- Is the sweeper on at all?
+SELECT value FROM app_config WHERE key = 'sweeper.enabled';
+
+-- What is actually stuck, and for how long?
+SELECT id, kind, attempt, now() - started_at AS running_for
+  FROM generation_job WHERE status = 'RUNNING' ORDER BY started_at;
+```
+
+It reclaims a job after `ai.job.timeout.seconds` — **requeuing** it if attempts remain, since a
+runner killed by a deploy did nothing wrong, and failing it only once they are exhausted. It
+skips whatever the runner is currently working on, so a genuinely slow job is left alone.
+
+If it is off, turn it on; that is the fix. Only if the sweeper itself is broken should you do
+this by hand, and prefer requeuing to failing:
 
 ```sql
 UPDATE generation_job
-   SET status = 'FAILED', error_code = 'RECLAIMED', finished_at = now()
+   SET status = 'QUEUED', error_code = 'RECLAIMED', updated_at = now()
  WHERE status = 'RUNNING' AND started_at < now() - interval '10 minutes';
 ```
+
+⚠️ Whichever you do, **check the projects**. A job that ends `FAILED` moves its project out of
+`GENERATING` through the pipeline; one you edit in SQL does not:
+
+```sql
+SELECT id, name, status FROM sandbox_project WHERE status = 'GENERATING';
+```
+
+## Incident: generated routes do not match
+
+**Alert:** `alert.unmatchedRoutes`. A large share of sandbox calls in the last hour matched no
+endpoint.
+
+This is the one alert about the **product** rather than the platform, and the roadmap names it
+as *the* signal that generation quality is not good enough. Users are hitting 404s on their own
+integration and, reasonably, blaming their own code.
+
+1. **See whose, and what they were reaching for.** An unmatched call is the most useful row in
+   the request log precisely because it is usually a path the generator got wrong.
+
+   ```sql
+   SELECT sp.id, sp.name, sp.source_product, count(*) AS misses,
+          array_agg(DISTINCT log.method || ' ' || log.path ORDER BY log.method || ' ' || log.path) AS paths
+     FROM mock_request_log log
+     JOIN sandbox_project sp ON sp.id = log.project_id
+    WHERE log.endpoint_id IS NULL
+      AND log.created_at > now() - interval '1 hour'
+    GROUP BY sp.id, sp.name, sp.source_product
+    ORDER BY misses DESC LIMIT 20;
+   ```
+
+2. **Tell the two cases apart**, because they need opposite responses:
+
+   | Shape | Means | Do |
+   | --- | --- | --- |
+   | One project, many paths | that generation went badly | the user can revise, or regenerate with the product's spec pasted in |
+   | Many projects, similar paths | a systemic problem — a prompt or a model change | look at what changed. Consider routing SPEC back to a previous model |
+   | One project, one path, high volume | a caller looping against a route that does not exist | usually the user's own retry loop |
+
+3. **Nothing here is urgent in the way spend is.** No money is being lost and nothing is
+   filling. Resist the temptation to change prompts during the alert; establish which of the
+   three shapes it is first.
+
+4. **The lasting fix is a supplied spec.** A pasted or linked OpenAPI or Postman document skips
+   research entirely and the routes come out exact. If the same product misses repeatedly, that
+   is the answer to give the user.
 
 ## Incident: a project API key leaked
 
