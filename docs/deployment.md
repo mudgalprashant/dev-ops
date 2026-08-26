@@ -1,11 +1,53 @@
 ---
-title: Deployment
+title: Deployment — bidceleb
 status: current
 last_updated: 2026-08-26
-applies_to: [every repo in every project]
+applies_to: [bidceleb-backend, bidceleb-frontend]
 ---
 
-# Deployment
+# Deployment — bidceleb
+
+Two pieces, two hosts, both free and neither needing a card.
+
+| Piece | Host | Why |
+| --- | --- | --- |
+| Board (`bidceleb-frontend`) | **Firebase Hosting**, static export → <https://bidceleb.web.app> | free on Spark with no card; the output is plain files, so moving later is a redeploy |
+| API (`bidceleb-backend`) | **Render** free web service, from the `Dockerfile` | suspends rather than bills; no card |
+
+They are on **different origins**, so the API's CORS allowlist
+(`BIDCELEB_CORS_ALLOWED_ORIGINS`) is load-bearing — without it the deployed board cannot
+call the API at all, and the failure appears only in the browser console.
+
+## Deploying the board
+
+```bash
+# The API must be reachable at BUILD time: generateStaticParams enumerates the celebrity
+# pages and generateMetadata gives each its own title.
+BIDCELEB_BUILD_API_BASE=http://localhost:8080 \
+NEXT_PUBLIC_API_BASE_URL=https://bidceleb-backend.onrender.com \
+npm run build
+firebase deploy --only hosting --project bidceleb
+```
+
+⚠️ **A celebrity added after a deploy has no page until the next one.** The board picks new
+entries up immediately (it fetches at runtime); only `/x/<slug>` and `/boost/<slug>` are
+frozen at build.
+
+### What the free tier costs here, and when to leave it
+
+Firebase's free plan serves static files only, so there is no server rendering and link
+previews carry no live figures. The upgrade is **Firebase App Hosting**, which runs the SSR
+build properly and requires Blaze and a card — the right move once boost revenue makes a
+billing account unremarkable. Nothing in the code blocks it.
+
+## Deploying the API
+
+Render → **New → Blueprint** → pick `bidceleb-backend`; it reads `render.yaml` and prompts
+for every `sync: false` value. Everything below is the generic mechanism.
+
+---
+
+# The mechanism
 
 ## Environments
 

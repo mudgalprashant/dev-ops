@@ -94,17 +94,41 @@ boosting — those never needed an account.
 
 ## Do these before deploying
 
-### 3. Render — the host
+### 3a. Firebase Hosting — the board  ✅ DONE
+
+The Firebase project **`bidceleb`** exists and the board is deployed to
+<https://bidceleb.web.app>. Nothing to do unless you are redeploying.
+
+📌 The same project is what step 2 needs for Authentication — one project serves both.
+📌 Spark (free, no card). It serves **static files only**, which is why the board is a
+static export. Upgrading to App Hosting for server rendering needs Blaze and a card.
+
+### 3. Render — the API
 
 **Why:** chosen for its **billing model**, not its specs — no credit card, and hitting a
 limit **suspends rather than charges**.
 
 **Do:** render.com → **Sign up with GitHub** → **New → Blueprint** → pick `bidceleb-backend`
 → Render reads `render.yaml` and proposes the service → it prompts for each `sync: false`
-secret; paste `BIDCELEB_DB_*`, `BIDCELEB_FIREBASE_PROJECT_ID`, `BIDCELEB_PAYMENT_*` →
-**Apply**.
+value → **Apply**.
 
-**Feeds:** `BIDCELEB_PUBLIC_BASE_URL` = `https://bidceleb-backend.onrender.com`.
+Set these three alongside the database and payment values:
+
+| Variable | Value |
+| --- | --- |
+| `BIDCELEB_PUBLIC_BASE_URL` | `https://bidceleb-backend.onrender.com` |
+| `BIDCELEB_WEB_BASE_URL` | `https://bidceleb.web.app` |
+| `BIDCELEB_CORS_ALLOWED_ORIGINS` | `https://bidceleb.web.app,https://bidceleb.firebaseapp.com` |
+
+⚠️ **Without the CORS value the board cannot call the API at all**, and the only evidence is
+in the browser console — the API's own logs show nothing, because the request never
+arrives. It is the first thing to check if the deployed board says it cannot reach the board.
+
+⚠️ **Check the service's actual URL after Apply.** The board's bundle has
+`https://bidceleb-backend.onrender.com` baked in at build time; if Render appends a suffix
+because the name is taken, the frontend needs rebuilding and redeploying with the real one.
+
+**Feeds:** `BIDCELEB_PUBLIC_BASE_URL`.
 **Verify:** `curl …/actuator/health` → `{"status":"UP"}`, and the deploy log shows the
 migrations applying.
 📌 512 MB / 0.1 CPU is tight. If it OOMs, the honest fix is Render's paid instance, not a
@@ -216,6 +240,8 @@ happen, and processors read chargeback rates before they read terms.
 - [ ] Branch protection **verified by a rejected push**
 - [ ] UptimeRobot live; Sentry receiving; the `alert.` log alert configured
 - [ ] Terms, disclaimer, takedown contact and privacy pages published
+- [ ] `BIDCELEB_CORS_ALLOWED_ORIGINS` set, and the deployed board actually loads data
+- [ ] Render's real service URL matches what the board was built against
 - [ ] **A test boost settles end to end in the provider's test mode**, and a replay of the
       same webhook changes nothing
 

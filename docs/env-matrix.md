@@ -22,7 +22,9 @@ The three rules, the naming convention and the Postgres pooler traps are canonic
 | --- | --- | --- | --- | --- | --- |
 | `BIDCELEB_PORT` | ✅ | | ✅ | ❌ | 8080. The host maps 443 → this; 8080 is never public |
 | `BIDCELEB_LOG_LEVEL` | ✅ | | ✅ | ❌ | `INFO`. `DEBUG` on a 0.1-CPU instance costs real latency |
-| `BIDCELEB_PUBLIC_BASE_URL` | ✅ | | ✅ | ❌ | **Origin only, no trailing slash, no path.** Used to build checkout return URLs and OG image URLs. Verify: a checkout redirect lands back on the right host |
+| `BIDCELEB_PUBLIC_BASE_URL` | ✅ | | ✅ | ❌ | **Origin only, no trailing slash, no path.** The API's own address. Verify: a checkout redirect lands back on the right host |
+| `BIDCELEB_WEB_BASE_URL` | ✅ | | ✅ | ❌ | Where the board lives — `https://bidceleb.web.app`. Checkout returns here, not to the API |
+| `BIDCELEB_CORS_ALLOWED_ORIGINS` | ✅ | | ✅ | ❌ | Comma-separated allowlist. **Never `*`** — see below |
 
 ### Database — Supabase, session pooler
 
@@ -83,11 +85,22 @@ sign-in. Watch for it rather than relying on an outage to tell you.
 which reads to a user as "my login is broken". Check this value first when sign-in
 misbehaves.
 
+> ⚠️ **`BIDCELEB_CORS_ALLOWED_ORIGINS` is not a formality.** The board is a static site on
+> a different origin, so without it the deployed app cannot call the API at all — every
+> request fails preflight and the board shows an error with nothing in the API's logs to
+> explain it. In production it is
+> `https://bidceleb.web.app,https://bidceleb.firebaseapp.com` (Firebase serves both).
+>
+> **Never a wildcard.** Nothing is authenticated yet, which makes `*` look harmless — but
+> `/api/v1/checkout/boost` creates payment intents, and the moment sign-in lands a wildcard
+> becomes a standing invitation. An allowlist that is correct now stays correct.
+
 ## Frontend — `bidceleb-frontend`
 
 | Variable | Secret | Notes |
 | --- | --- | --- |
-| `NEXT_PUBLIC_API_BASE_URL` | ❌ | |
+| `NEXT_PUBLIC_API_BASE_URL` | ❌ | Baked into the browser bundle at build time — changing it is a rebuild, not a config change |
+| `BIDCELEB_BUILD_API_BASE` | ❌ | Build-time only, for `generateStaticParams` / `generateMetadata`. **Deliberately separate**: the build needs an API it can reach now (usually local); the bundle needs the address visitors use later |
 | `NEXT_PUBLIC_FIREBASE_API_KEY` | ❌ | a Firebase web "API key" is an identifier, not a credential |
 | `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` | ❌ | |
 | `NEXT_PUBLIC_FIREBASE_PROJECT_ID` | ❌ | |
