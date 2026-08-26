@@ -47,6 +47,35 @@ git merge-base --is-ancestor $(git rev-parse main) <project> \
   || git merge-base main <project>      # must print a sha, not nothing
 ```
 
+### ⚠️ The first forward-merge into an EXISTING project branch will conflict
+
+Creating `main` from the root commit means `main`'s history contains the deletion of
+whatever project content that root commit held. So the first `git merge main` into a
+pre-existing project branch proposes deleting that project's own files:
+
+```
+CONFLICT (modify/delete): <project>-backend-context/SKILL.md deleted in main
+                          and modified in HEAD.
+```
+
+**This is expected, and it is a one-time cost.** Resolve it by keeping the project branch's
+version of everything the project owns:
+
+```bash
+git checkout --ours <the project's own paths>      # keep the project's content
+git checkout --theirs <shared paths main improved> # take main's improvements
+```
+
+Git records the resolution in the merge commit, so later merges do not re-propose it.
+
+Branches created *from* `main` afterwards — every new project — never see this at all,
+because they never had the content in the first place. Verify that too:
+
+```bash
+git checkout <project> && git merge --no-commit --no-ff main   # expect: Already up to date
+git merge --abort
+```
+
 ## 2. Create the project's branches
 
 ```bash
