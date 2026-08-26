@@ -1,54 +1,65 @@
 ---
-title: Free-tier budget — what runs out first
+title: Free-tier budget — bidceleb
 status: current
 last_updated: 2026-08-26
-applies_to: [every repo in every project]
+applies_to: [bidceleb-backend, bidceleb-frontend]
 ---
 
-# Free-tier budget
+# Free-tier budget — bidceleb
 
-A project's own branch answers this question **in order, for that product**. The ordering
-is what matters: knowing the ceilings is useless without knowing which one you hit first.
+The ceilings of the default stack are canonical on `main`. This file answers the only
+question that matters: **what runs out first, for this product.**
 
-## The template
+The shape of this product's load is unusual and drives the whole ordering: it is
+**read-heavy, public, and spiky**. Almost every visitor reads the board and never pays. The
+traffic arrives in bursts, because the growth loop is somebody losing their position and
+posting about it. Long quiet periods punctuated by sudden bursts is the worst possible
+pattern for a free tier, and every row below follows from it.
 
-| # | Limit | Ceiling | What consumes it | What happens at the wall | Mitigation |
+| # | Limit | Ceiling | What consumes it | At the wall | Mitigation |
 | --- | --- | --- | --- | --- | --- |
-| 1 | | | | | |
+| 1 | **Render cold start** | ~15 min idle → 30–60 s wake | quiet periods between bursts | the burst arrives at a sleeping service and the share link looks broken | the `pg_cron` keep-alive. **Load-bearing, not hygiene** |
+| 2 | **Render 512 MB / 0.1 CPU** | hard | a burst of concurrent leaderboard reads | OOM, or latency bad enough that people leave | cache the leaderboard aggressively; it is the same response for everyone |
+| 3 | **Supabase 500 MB** | hard | `payment_event` (raw webhook payloads) | writes fail — including settlements | **write the purge job in the payments slice**, not after |
+| 4 | **Render 750 instance-hours** | 744 h in a 31-day month | always-on keep-alive | service suspends | ~6 h of margin. One free service fits; two do not |
+| 5 | **Supabase egress 5 GB** | soft | leaderboard queries | | the cache in row 2 also fixes this |
+| 6 | **Firebase 3,000 DAU** | soft | sign-in only | | **sign-in is optional here** — most visitors never authenticate, so this is far away |
 
-Fill it in **sorted by how soon you hit it**, not by size. Then write down the answer to
-one question for each row: *does hitting this suspend the service, degrade it, or bill me?*
+## Why cold start is number one, and not an inconvenience
 
-## Quantified ceilings of the default stack
+For most products a cold start is a slow first page. Here it is the growth loop failing at
+its most valuable moment: someone has just been outbid, has posted the link, and thirty
+people click it at once. They arrive at a service that takes 45 seconds to answer.
 
-Verify each against the provider before relying on it; free tiers move.
+It is also the cheapest thing on this list to fix — one `pg_cron` job — which is exactly
+why it gets skipped. Treat the keep-alive as infrastructure with an owner and a check, not
+as a setup step that was done once.
 
-| Provider | Free ceiling |
-| --- | --- |
-| Render web service | 512 MB RAM, 0.1 CPU, 750 instance-hours/month, 100 GB bandwidth |
-| Supabase | 500 MB database, 1 GB file storage, 5 GB egress, 2 projects |
-| Firebase Spark | ~3,000 daily active users |
-| GitHub Actions | unlimited on public repos; 2,000 minutes/month private |
-| Sentry | ~5,000 errors/month |
-| UptimeRobot | 50 monitors at 5-minute intervals |
+## Why `payment_event` and not a request log
 
-⚠️ 750 instance-hours against **744 hours in a 31-day month** is roughly six hours of
-margin. One always-on free service fits; two do not.
+This product does not write a row per served request; the board is a read. What it does
+write is a row per webhook, with the raw payload, and those payloads are large.
 
-## The three that catch people out
+The retention window is not a tuning knob: **keep at least 90 days**, because that is the
+usual chargeback window and those rows are the evidence. So the purge job cannot simply be
+"delete old rows" — it has to keep the reconciliation window intact. Write it with the
+payments slice, while the reasoning is in front of you.
 
-1. **Unbounded log or event tables.** Anything that writes a row per served request grows
-   without limit and will hit the database ceiling long before traffic hits any other one.
-   **Write the purge job in the same change that adds the table** — a retention setting
-   with no job behind it is decorative, and it is always discovered during an incident.
-2. **A rate limit is a wall, not a bill.** Requests-per-minute ceilings on third-party APIs
-   fail the request rather than charging you, so a job that fans out breaks where a job
-   that paces itself succeeds.
-3. **Memory is the tightest technical limit.** If the service OOMs, the honest fix is
-   usually the host's smallest paid instance, not a week of tuning.
+⚠️ A retention setting with no job behind it is decorative, and it is always discovered
+during an incident.
 
-## Reviewing this
+## What is deliberately not a constraint here
 
-Re-check when traffic changes by an order of magnitude, when a new table starts growing
-per-request, or when a provider changes its plans. A budget nobody has re-read in six
-months is a guess.
+- **No AI spend.** Nothing in this product calls a model, so the entire category of
+  runaway-spend controls that dominates a generative product does not apply. The money risk
+  here runs the *other* way: money coming in and not being honoured.
+- **No per-request log table.** The board is cached; the ledger is the only thing that grows
+  with success.
+- **Payment provider fees are a cost of revenue, not a free-tier limit.** They scale with
+  income and never suspend anything.
+
+## Review triggers
+
+Re-read this when the board takes 10× the boosts it does today, when a category page
+becomes as popular as `ALL`, or when anything starts writing a row per page view. The first
+two change row 2; the third would insert a new row 1.

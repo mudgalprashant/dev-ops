@@ -1,5 +1,5 @@
 # Backend CI — build, test, verify migrations.
-# OWNER: dev-ops (this repo). PLACEMENT: <project>-backend/.github/workflows/ci.yml
+# OWNER: dev-ops (this repo). PLACEMENT: bidceleb-backend/.github/workflows/ci.yml
 # Authored here, copied into the backend repo — see ci/README.md. Do not edit in two
 # places; dev-ops/ci/backend-ci.yml is the source of truth.
 #

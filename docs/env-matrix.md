@@ -1,97 +1,133 @@
 ---
-title: Environment matrix
+title: Environment matrix — bidceleb
 status: current
 last_updated: 2026-08-26
-applies_to: [every repo in every project]
+applies_to: [bidceleb-backend, bidceleb-frontend, dev-ops]
 ---
 
-# Environment matrix
+# Environment matrix — bidceleb
 
-**Names only — never a value, in this file or any other.** The authority for what an
-application actually reads is its own configuration file and its `render.yaml`; this doc
-exists so a human can see the whole contract in one place.
+**Names only — never a value, in this file or any other.** The authority for what the
+backend actually reads is `bidceleb-backend/src/main/resources/application.yaml` and
+`render.yaml`.
 
-## The three rules
+The three rules, the naming convention and the Postgres pooler traps are canonical on
+`main` — see that branch's `docs/env-matrix.md`. This file is the inventory.
 
-1. **Never a value in this repo**, including a placeholder that looks real. Use
-   `CHANGE_ME_LOCAL_ONLY`. A realistic-looking fake gets copied into production by someone
-   in a hurry.
-2. **The app fails to start when a required variable is missing — never a silent default.**
-   A silent default is how a production outage starts: the service comes up healthy and
-   points at the wrong thing.
-3. **Anything governing spend, pricing or a limit belongs in a database row, not an
-   environment variable**, so it can be changed during an incident without a deploy.
+## Backend — `bidceleb-backend`
 
-## Naming
+### Runtime
 
-`<PROJECT>_<AREA>_<THING>` — one prefix per project, so `printenv | grep <PROJECT>_` shows
-the entire contract. Deploy-related secrets are named after the **role**, not the vendor
-(`DEPLOY_SSH_KEY`, not `ACME_SSH_KEY`): hosts get changed, and a vendor name in a secret
-name turns the next migration into a rename across three places.
-
-## The table each project fills in
-
-| Variable | local | test | prod | Secret | Purpose / how to verify |
+| Variable | local | test | prod | Secret | Purpose / verify |
 | --- | --- | --- | --- | --- | --- |
-| `<PROJECT>_PORT` | ✅ | | ✅ | ❌ | |
-| `<PROJECT>_LOG_LEVEL` | ✅ | | ✅ | ❌ | |
-| `<PROJECT>_PUBLIC_BASE_URL` | ✅ | | ✅ | ❌ | origin only, no trailing slash, no path |
-| `<PROJECT>_DB_URL` | ✅ | | ✅ | 🟡 | |
-| `<PROJECT>_DB_USERNAME` | ✅ | | ✅ | 🟡 | |
-| `<PROJECT>_DB_PASSWORD` | ✅ | | ✅ | ✅ | |
-| `<PROJECT>_DB_POOL_MAX` | ✅ | | ✅ | ❌ | sized against the **database's** limit, not expected load |
+| `BIDCELEB_PORT` | ✅ | | ✅ | ❌ | 8080. The host maps 443 → this; 8080 is never public |
+| `BIDCELEB_LOG_LEVEL` | ✅ | | ✅ | ❌ | `INFO`. `DEBUG` on a 0.1-CPU instance costs real latency |
+| `BIDCELEB_PUBLIC_BASE_URL` | ✅ | | ✅ | ❌ | **Origin only, no trailing slash, no path.** Used to build checkout return URLs and OG image URLs. Verify: a checkout redirect lands back on the right host |
 
-Add one row per variable. Every row needs a *how to verify* — a variable nobody can check
-is a variable nobody can fix.
+### Database — Supabase, session pooler
 
-Mark each **Secret** column ✅ / 🟡 / ❌ using the classification in [secrets.md](secrets.md).
+| Variable | local | test | prod | Secret | Purpose / verify |
+| --- | --- | --- | --- | --- | --- |
+| `BIDCELEB_DB_URL` | ✅ | | ✅ | 🟡 | JDBC form, port **5432**, `?sslmode=require` |
+| `BIDCELEB_DB_USERNAME` | ✅ | | ✅ | 🟡 | `postgres.<project-ref>` — the qualified form |
+| `BIDCELEB_DB_PASSWORD` | ✅ | | ✅ | ✅ | full read/write over the boost ledger |
+| `BIDCELEB_DB_POOL_MAX` | ✅ | | ✅ | ❌ | **2 in production.** Sized against Supabase's limit, not load |
 
-## Retired variables
+The test column is empty on purpose: **the test suite starts its own Postgres binary and
+needs no database variables at all.** That is what lets CI run on a fork's pull request.
 
-Keep a **Retired — delete on sight** list at the bottom of the project's version of this
-file. A variable that is no longer read but still set is an unused credential: it can only
-ever be a liability, so delete it rather than rotating it. Retired names are also the ones
-most likely to be re-added by an out-of-date guide.
+### Payments
 
----
+| Variable | local | test | prod | Secret | Purpose / verify |
+| --- | --- | --- | --- | --- | --- |
+| `BIDCELEB_PAYMENT_API_KEY` | 🟡 | | ✅ | ✅ | Locally use the provider's **test-mode** key, never production's |
+| `BIDCELEB_PAYMENT_WEBHOOK_SECRET` | 🟡 | | ✅ | ✅ **top-tier** | see below |
 
-## Postgres via a connection pooler — the three traps
+> ⚠️ **`BIDCELEB_PAYMENT_WEBHOOK_SECRET` is this project's highest-consequence credential.**
+> Popularity is minted by exactly one code path: a signature-verified webhook. Whoever holds
+> that secret can forge settlements and award unlimited popularity **without paying**, and
+> the fraud is invisible in the payment provider's dashboard because no payment ever
+> existed. The database password leaks *data*; this leaks the *product's integrity*, which
+> is the thing customers are actually buying.
+>
+> Detection: `SELECT` settled boosts whose `payment_id` has no corresponding provider
+> charge. Response: rotate the endpoint secret first, then reconcile the ledger against the
+> provider's own record of charges — never against our own.
 
-These apply to any managed Postgres fronted by a pooler (Supabase/Supavisor and friends),
-and each one fails confusingly:
+The provider's base URL, its display name and which env var holds its key are **columns in
+`payment_provider_config`**, not environment variables: switching provider must be an
+`UPDATE`, not a release. The row stores the env var's **name**, never its value, so a
+database backup is never a credential leak.
 
-1. **Direct connections are often IPv6-only** without a paid add-on. Most hosts have no
-   IPv6 egress, and the error reads like a firewall problem.
-2. **Transaction mode has no prepared statements.** ORMs and migration tools both need
-   them. Same host, different port, completely different semantics.
-3. **A migration tool's advisory lock is connection-scoped**, so transaction pooling can
-   release it on a different backend than took it — producing a lock that appears held by
-   nobody.
+⚠️ Until a real key is set, leave `payment_provider_config.active = false` for every live
+provider and run the `STUB` adapter. A provider marked active with no key fails at request
+time — that is, in front of a paying user — instead of at startup.
 
-→ **Use session mode (port 5432), not transaction mode (6543), and not direct.**
+### Identity — Firebase (optional sign-in)
 
-⚠️ Managed providers hand you a **libpq** URL; a JVM application needs a **JDBC** one.
-Prepend `jdbc:`, drop any embedded `user:password@`, and keep `?sslmode=require`:
+| Variable | local | test | prod | Secret | Purpose / verify |
+| --- | --- | --- | --- | --- | --- |
+| `BIDCELEB_FIREBASE_PROJECT_ID` | 🟡 | | ✅ | ❌ | **Not a secret** — ID tokens are verified as RS256 JWTs against Google's published JWK set |
+
+**There is no Firebase service-account key anywhere in this system.** If a guide tells you
+to download `firebase-adminsdk-*.json`, it does not apply here — skip it.
+
+⚠️ **Absence is meaningful, and it is meaningful differently here than in a
+sign-in-required product.** With no project id there is no token decoder, so the
+*authenticated* routes (`/api/v1/me`, the admin queue) fail closed — but the board, the
+leaderboard and **boosting still work**, because boosting never required an account. A
+missing project id therefore does **not** take the product down; it silently removes
+sign-in. Watch for it rather than relying on an outage to tell you.
+
+⚠️ **A wrong project id does not fail loudly.** Tokens are rejected as wrong-audience,
+which reads to a user as "my login is broken". Check this value first when sign-in
+misbehaves.
+
+## Frontend — `bidceleb-frontend`
+
+| Variable | Secret | Notes |
+| --- | --- | --- |
+| `NEXT_PUBLIC_API_BASE_URL` | ❌ | |
+| `NEXT_PUBLIC_FIREBASE_API_KEY` | ❌ | a Firebase web "API key" is an identifier, not a credential |
+| `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` | ❌ | |
+| `NEXT_PUBLIC_FIREBASE_PROJECT_ID` | ❌ | |
+| `NEXT_PUBLIC_FIREBASE_APP_ID` | ❌ | |
+
+**INVARIANT: anything prefixed `NEXT_PUBLIC_` ships to the browser and is public.** The
+payment API key, the webhook signing secret and the database credentials must never appear
+here. There is no server-side secret in the frontend at all — every privileged action goes
+through the backend.
+
+## CI — GitHub Actions
+
+**None.** The backend's tests start their own database; the frontend's build needs only
+public values; and the host builds from the repo, so there is no deploy secret. If that
+ever changes, the value goes in a GitHub **Environment** named `production` with required
+reviewers — never a repository secret.
+
+## Not environment variables — `app_config` rows
+
+Anything governing **pricing, limits or a kill switch** lives in the database so it can be
+changed mid-incident without a deploy:
 
 ```
-✗ postgresql://user:password@host.pooler.example.com:5432/postgres
-✓ jdbc:postgresql://host.pooler.example.com:5432/postgres?sslmode=require
+payments.enabled                  master kill switch — stops TAKING money, never serving
+boost.min.cents                   floor for a single boost, and the empty-tab target
+boost.outbid.rate.bps             the increment rate in basis points (500 = 5%)
+boost.outbid.cap.cents            the increment ceiling (5000 = $50)
+boost.outbid.min.increment.cents  floor for the increment (100 = $1)
+boost.max.cents                   sanity ceiling on one boost; above it, review manually
+listing.price.cents               what adding a celebrity costs today
+listing.list.price.cents          the struck-through "was" price
+listing.enabled                   accept new submissions at all
+leaderboard.page.size.max         paging ceiling
+watch.enabled                     silences the alert.* WARN lines — the WARNING, not the limit
+watch.settlement.gap.minutes      how long a created-but-unsettled boost may sit
+watch.storage.budget.mb           database size at which alert.storage fires
 ```
 
-The username usually carries the project reference (`postgres.<project-ref>`). If an
-authentication error names the *bare* user rather than the qualified one, the password is
-not the problem — the username never reached the app and a local default took over.
+## Retired — delete on sight
 
-## Browser-visible variables
-
-**INVARIANT: anything a build inlines into client code is public.** In Next.js that is the
-`NEXT_PUBLIC_` prefix; every framework has an equivalent. Database credentials, provider
-API keys and webhook signing secrets must never appear there. Assume anything on that list
-is printed on a billboard.
-
-## What CI needs
-
-Usually nothing. Design the test suite to require **no credentials** — a suite that needs a
-secret cannot run on a fork's pull request, and the workarounds for that are all worse than
-the constraint. Where CI genuinely needs a value, it goes in a GitHub **Environment**, not
-a repository secret ([secrets.md](secrets.md) Step 2).
+Nothing yet. When a variable stops being read, delete it from the host's dashboard and add
+it here. An unused credential can only ever be a liability — delete it rather than rotating
+it, and expect out-of-date guides to keep re-adding it.

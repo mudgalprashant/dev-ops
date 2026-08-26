@@ -6,8 +6,8 @@ and **copied** into each app repo under `.github/workflows/`.
 
 | Source (this repo) | Destination | Owner repo |
 | --- | --- | --- |
-| `ci/backend-ci.yml` | `<project>-backend/.github/workflows/ci.yml` | the backend repo |
-| `ci/frontend-ci.yml` | `<project>-frontend/.github/workflows/ci.yml` | the frontend repo |
+| `ci/backend-ci.yml` | `bidceleb-backend/.github/workflows/ci.yml` | bidceleb-backend |
+| `ci/frontend-ci.yml` | `bidceleb-frontend/.github/workflows/ci.yml` | bidceleb-frontend |
 
 Copy command, run from the **destination** repo, on branch `dev`:
 
