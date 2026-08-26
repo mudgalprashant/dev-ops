@@ -1,0 +1,10 @@
+# Every PR requires review from the repository owner.
+#
+# This is the control that keeps merges in one pair of hands: combined with
+# "Require review from Code Owners" in branch protection, no PR can merge
+# without the owner approving it.
+#
+# ⚠️ While solo, required approvals stay at 0 — GitHub forbids self-approval, and
+# approvals >= 1 plus "do not allow bypassing" locks you out of your own release
+# branch. See docs/github-setup.md Step 3.
+* @mudgalprashant

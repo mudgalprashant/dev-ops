@@ -1,101 +1,97 @@
 ---
-title: Environment variable matrix
+title: Environment matrix
 status: current
-last_updated: 2026-08-22
+last_updated: 2026-08-26
+applies_to: [every repo in every project]
 ---
 
-# Environment variable matrix
+# Environment matrix
 
-Every variable, which app needs it, whether it is a secret, and **how to verify it is
-right**. Names only — never a value, in this file or any other.
+**Names only — never a value, in this file or any other.** The authority for what an
+application actually reads is its own configuration file and its `render.yaml`; this doc
+exists so a human can see the whole contract in one place.
 
-Authority for what the backend actually reads: `drovi-backend/src/main/resources/application.yaml`
-and `render.yaml`.
+## The three rules
 
-## Backend — drovi-backend (Spring Boot 4)
+1. **Never a value in this repo**, including a placeholder that looks real. Use
+   `CHANGE_ME_LOCAL_ONLY`. A realistic-looking fake gets copied into production by someone
+   in a hurry.
+2. **The app fails to start when a required variable is missing — never a silent default.**
+   A silent default is how a production outage starts: the service comes up healthy and
+   points at the wrong thing.
+3. **Anything governing spend, pricing or a limit belongs in a database row, not an
+   environment variable**, so it can be changed during an incident without a deploy.
 
-### Runtime
+## Naming
 
-| Variable | Req in | Secret | Verify |
-| --- | --- | --- | --- |
-| `DROVI_PORT` | all | | `curl localhost:$DROVI_PORT/actuator/health` → `UP` |
-| `DROVI_LOG_LEVEL` | all | | logs appear at the set level |
-| `DROVI_PUBLIC_BASE_URL` | prod | | origin only, no path. It is what users paste before `/s/<key>` |
+`<PROJECT>_<AREA>_<THING>` — one prefix per project, so `printenv | grep <PROJECT>_` shows
+the entire contract. Deploy-related secrets are named after the **role**, not the vendor
+(`DEPLOY_SSH_KEY`, not `ACME_SSH_KEY`): hosts get changed, and a vendor name in a secret
+name turns the next migration into a rename across three places.
 
-### PostgreSQL (Supabase, session pooler)
+## The table each project fills in
 
-| Variable | Req in | Secret | Verify |
-| --- | --- | --- | --- |
-| `DROVI_DB_URL` | all | | app starts and Flyway logs 2 migrations applied. **Port must be 5432, not 6543** |
-| `DROVI_DB_USERNAME` | all | | form is `postgres.<project-ref>` for the pooler |
-| `DROVI_DB_PASSWORD` | all | ✅ | connect succeeds (no `password authentication failed`) |
-| `DROVI_DB_POOL_MAX` | all | | Hikari logs the pool size at boot. **2 on Render free** — the pooler is shared and a big pool starves every other client of the project |
+| Variable | local | test | prod | Secret | Purpose / how to verify |
+| --- | --- | --- | --- | --- | --- |
+| `<PROJECT>_PORT` | ✅ | | ✅ | ❌ | |
+| `<PROJECT>_LOG_LEVEL` | ✅ | | ✅ | ❌ | |
+| `<PROJECT>_PUBLIC_BASE_URL` | ✅ | | ✅ | ❌ | origin only, no trailing slash, no path |
+| `<PROJECT>_DB_URL` | ✅ | | ✅ | 🟡 | |
+| `<PROJECT>_DB_USERNAME` | ✅ | | ✅ | 🟡 | |
+| `<PROJECT>_DB_PASSWORD` | ✅ | | ✅ | ✅ | |
+| `<PROJECT>_DB_POOL_MAX` | ✅ | | ✅ | ❌ | sized against the **database's** limit, not expected load |
 
-⚠️ Three Supabase traps, all of which fail confusingly: direct connections are IPv6-only
-without a paid add-on; transaction mode (6543) has no prepared statements, which Hibernate
-and Flyway both need; and Flyway's advisory lock is connection-scoped. **Session mode,
-port 5432.**
+Add one row per variable. Every row needs a *how to verify* — a variable nobody can check
+is a variable nobody can fix.
 
-### Model provider — Anthropic
+Mark each **Secret** column ✅ / 🟡 / ❌ using the classification in [secrets.md](secrets.md).
 
-| Variable | Req in | Secret | Verify |
-| --- | --- | --- | --- |
-| `DROVI_ANTHROPIC_API_KEY` | prod | ✅ | a generation completes and writes an `ai_call` row with `status = 'OK'` |
+## Retired variables
 
-The base URL, model, auth header name and max output tokens are **columns in
-`ai_provider_config`**, not env vars — switching provider or model must be an `UPDATE`, not
-a release (#38). The row names which env var holds the key (`api_key_env_var`), so a
-database backup is never a credential leak.
+Keep a **Retired — delete on sight** list at the bottom of the project's version of this
+file. A variable that is no longer read but still set is an unused credential: it can only
+ever be a liability, so delete it rather than rotating it. Retired names are also the ones
+most likely to be re-added by an out-of-date guide.
 
-⚠️ Until the key is set, leave `ai_provider_config.active = false`. A provider marked
-active with no key fails every call at request time instead of at startup, which is the
-worse failure.
+---
 
-### Identity — Firebase (**not yet wired**)
+## Postgres via a connection pooler — the three traps
 
-| Variable | Req in | Secret | Verify |
-| --- | --- | --- | --- |
-| `DROVI_FIREBASE_PROJECT_ID` | prod | | a valid ID token verifies; one from another project is rejected |
-| `DROVI_FIREBASE_CREDENTIALS_B64` | prod | ✅ | base64 of the service-account JSON; app starts without a credentials error |
+These apply to any managed Postgres fronted by a pooler (Supabase/Supavisor and friends),
+and each one fails confusingly:
 
-## Console — drovi-frontend (Next.js, not yet built)
+1. **Direct connections are often IPv6-only** without a paid add-on. Most hosts have no
+   IPv6 egress, and the error reads like a firewall problem.
+2. **Transaction mode has no prepared statements.** ORMs and migration tools both need
+   them. Same host, different port, completely different semantics.
+3. **A migration tool's advisory lock is connection-scoped**, so transaction pooling can
+   release it on a different backend than took it — producing a lock that appears held by
+   nobody.
 
-| Variable | Req in | Secret | Notes |
-| --- | --- | --- | --- |
-| `NEXT_PUBLIC_API_BASE_URL` | all | | the console API origin |
-| `NEXT_PUBLIC_FIREBASE_*` | all | | the **web** config — publishable by design, not secret |
+→ **Use session mode (port 5432), not transaction mode (6543), and not direct.**
 
-INVARIANT: anything prefixed `NEXT_PUBLIC_` ships to the browser and is public. The model
-provider key, database credentials and the Firebase **service account** must never appear
-here.
+⚠️ Managed providers hand you a **libpq** URL; a JVM application needs a **JDBC** one.
+Prepend `jdbc:`, drop any embedded `user:password@`, and keep `?sslmode=require`:
 
-## CI — GitHub Actions
+```
+✗ postgresql://user:password@host.pooler.example.com:5432/postgres
+✓ jdbc:postgresql://host.pooler.example.com:5432/postgres?sslmode=require
+```
 
-| Variable | Where | Secret | Notes |
-| --- | --- | --- | --- |
-| `RENDER_DEPLOY_HOOK_URL` | repo → Environment `production` | ✅ | Must live in a GitHub **Environment** with required reviewers, not a repo-wide secret — a PR build must never be able to read it |
+The username usually carries the project reference (`postgres.<project-ref>`). If an
+authentication error names the *bare* user rather than the qualified one, the password is
+not the problem — the username never reached the app and a local default took over.
 
-CI needs **no database variables**: integration tests start their own real Postgres from a
-Gradle dependency.
+## Browser-visible variables
 
-## Retired — delete on sight
+**INVARIANT: anything a build inlines into client code is public.** In Next.js that is the
+`NEXT_PUBLIC_` prefix; every framework has an equivalent. Database credentials, provider
+API keys and webhook signing secrets must never appear there. Assume anything on that list
+is printed on a billboard.
 
-These belonged to the flight-alerts product and mean nothing now. If you find one set
-anywhere, remove it:
+## What CI needs
 
-`DROVI_AERODATABOX_BASE_URL`, `DROVI_AERODATABOX_API_KEY`, `DROVI_WEBHOOK_PUBLIC_BASE_URL`,
-`DROVI_VENDOR_WEBHOOK_TOKEN`, `DROVI_VENDOR_WEBHOOK_SECRET`, `DROVI_EXPO_ACCESS_TOKEN`,
-`DROVI_REDIS_URL`, `DROVI_REDIS_PASSWORD`, `DROVI_JWT_SIGNING_KEY`, `DROVI_JWT_KEY_ID`,
-`DROVI_ACCESS_TOKEN_TTL`, `DROVI_REFRESH_TOKEN_TTL`, `DROVI_EMAIL_*`, `DROVI_SMS_*`.
-
-`DROVI_JWT_SIGNING_KEY` deserves a specific note: Drovi no longer mints tokens at all
-(#7). If one exists, it is an unused credential that can only ever be a liability —
-delete it rather than rotating it.
-
-## Rules
-
-- **Never a value in this repo**, including a placeholder that looks real. Use
-  `CHANGE_ME_LOCAL_ONLY`.
-- The app **fails to start** when a required variable is missing — never a silent default.
-- Anything governing spend belongs in `app_config`, not in an env var, so it can be
-  changed during an incident without a deploy.
+Usually nothing. Design the test suite to require **no credentials** — a suite that needs a
+secret cannot run on a fork's pull request, and the workarounds for that are all worse than
+the constraint. Where CI genuinely needs a value, it goes in a GitHub **Environment**, not
+a repository secret ([secrets.md](secrets.md) Step 2).

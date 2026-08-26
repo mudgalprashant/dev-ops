@@ -2,14 +2,21 @@
 .env
 .env.*
 !.env.example
+*.p8
+*.p12
+*.pem
+*.jks
+*.keystore
 
 # Local tunnel state / logs
 *.tunnel
+*-debug.log
 cloudflared.log
 ngrok.log
 
 # OS / editor cruft
 .DS_Store
+Thumbs.db
 .idea/
 .vscode/
 *.swp

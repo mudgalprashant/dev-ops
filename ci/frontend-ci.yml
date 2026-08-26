@@ -1,0 +1,57 @@
+# Frontend CI — lint, typecheck, test, build.
+# OWNER: dev-ops (this repo). PLACEMENT: <project>-frontend/.github/workflows/ci.yml
+# Authored here, copied into the frontend repo — see ci/README.md.
+#
+# Every step tolerates a script that does not exist yet, so a docs-only push stays green
+# before the app has code. Remove each guard as the corresponding script lands — a guard
+# left in place after the script exists is a step that can never fail, which is worse than
+# no step at all because it reads as coverage.
+#
+# No secrets. Anything the browser needs is public by definition (NEXT_PUBLIC_*), and a
+# build that needs a private value at build time is a design problem, not a CI problem.
+name: ci
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev]
+
+concurrency:
+  group: frontend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      # `npm ci` requires a lockfile and installs exactly it. Never `npm install` in CI:
+      # it silently resolves new versions, so CI stops testing what a developer runs.
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint --if-present
+
+      # Typecheck separately from `build`. Next.js can be configured to emit a production
+      # build despite type errors; a standalone tsc run cannot.
+      - name: Typecheck
+        run: npm run typecheck --if-present
+
+      - name: Test
+        run: npm test --if-present -- --run
+
+      - name: Build
+        run: npm run build --if-present

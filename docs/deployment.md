@@ -1,87 +1,69 @@
 ---
-title: Deployment — how the backend reaches production
+title: Deployment
 status: current
-last_updated: 2026-08-22
+last_updated: 2026-08-26
+applies_to: [every repo in every project]
 ---
 
 # Deployment
-
-⚠️ **Nothing is deployed, and nothing can be.** `drovi-backend` `main` HEAD is still
-`Initial commit`; the product exists only as an uncommitted working tree. Committing is
-step zero for everything below.
-
-## Topology
-
-```mermaid
-flowchart LR
-    DEV[Developer's app<br/>under test] -->|HTTPS 443<br/>/s/&lt;projectKey&gt;/…| BE
-    CONSOLE[Console — not built] -->|HTTPS 443<br/>/api/v1/…| BE
-    BE[drovi-backend<br/>Render free web service] -->|TCP 5432 TLS<br/>Supavisor SESSION pooler| PG[(Supabase Postgres)]
-    BE -->|HTTPS 443| AI[Anthropic API]
-    BE -->|HTTPS 443| FB[Firebase — token verification, not wired]
-    CRON[Supabase pg_cron<br/>every 5 min] -->|GET /actuator/health| BE
-```
-
-Two inbound paths, and the left one is the unusual part: **the caller is another
-developer's application**, not a browser and not a person. That shapes several decisions —
-cold starts read as timeouts, and the response shape must be the imitated product's, not
-ours.
-
-- **Only 443 is public.** `8080` is never exposed; Render terminates TLS.
-- **No inbound webhook.** Nothing external calls Drovi except the sandboxes' own users.
 
 ## Environments
 
 | Env | Where | Database | Deploy trigger |
 | --- | --- | --- | --- |
-| local | your machine | Supabase, or none — tests start their own | `./gradlew bootRun` |
-| test | GitHub Actions runner | a real Postgres from a Gradle dependency | every push |
-| prod | Render free web service | Supabase free, session pooler | push to `main` |
+| local | your machine | a local one, or none — tests start their own | run the app directly |
+| test | the CI runner | a real database the test suite starts itself | every push |
+| prod | one free web service on the host | the managed free tier | push to the release branch |
 
-There is no staging. At this size a second Render service and a second Supabase project
-would consume the free allowances that production depends on.
+**There is deliberately no staging.** A second service and a second database would consume
+the free allowances production depends on. When a change is risky enough to need staging,
+that is a signal about the change, not about the environments.
 
 ## How a deploy happens
 
-1. Push to `main`.
-2. Render builds the `Dockerfile` — the multi-stage build compiles the jar inside the
-   image, so the builder image needs only a JDK new enough to run Gradle.
-3. The container starts as a **non-root** user. Flyway applies pending migrations at
-   startup.
-4. `healthCheckPath: /actuator/health` gates the switchover.
+1. The release PR merges into the release branch.
+2. The host builds the `Dockerfile` (multi-stage; the artifact is compiled inside the image).
+3. The container starts as a **non-root** user; pending migrations apply at startup.
+4. A health check gates the switchover.
 
-The `Dockerfile` **is** the deploy path, not a portability hatch. Keeping deployment as a
-Dockerfile rather than provider-specific config is what made three host changes cheap.
+> **The `Dockerfile` *is* the deploy path, not a portability hatch.** Keeping deployment as
+> a Dockerfile rather than provider-specific configuration is what makes changing host
+> cheap — and hosts do get changed.
 
-## Migrations and the no-blue/green rule
+## One instance means no blue-green
 
-There is one instance, so during a deploy the new container starts while the old one is
-still serving. A migration must therefore be **compatible with the previously running
-version**: add columns before writing to them, never rename or drop in the same release
-that stops using them.
+The new container starts while the old one is still serving. Two consequences, both
+non-negotiable:
 
-INVARIANT: forward-only. Never roll back a migration; write a fix-forward one. Rolling the
-*image* back is safe only if the older image tolerates the newer schema.
+- **A migration must be compatible with the previously running version.** Add a column
+  before anything writes to it; never rename or drop in the same release that stops using
+  it. Two releases, always.
+- **INVARIANT: migrations are forward-only. Never roll back a migration; write a
+  fix-forward one.** Rolling the *image* back is safe only if the older image tolerates the
+  newer schema — which is exactly what the previous rule guarantees.
 
-## Resource tuning
+## Resource tuning on a small instance
 
-512 MB and 0.1 CPU is genuinely tight for a JVM. `JAVA_OPTS` caps the heap at 65% of the
-container limit — `MaxRAMPercentage` reads the cgroup limit, so changing plan size needs no
-rebuild — with `SerialGC` (below ~2 GB, G1's background threads cost more on 0.1 CPU than
-its pauses save) and `TieredStopAtLevel=1` (skips C2: slower steady state, markedly faster
-startup, which is the right trade when CPU is the scarce resource).
+At 512 MB and a fraction of a CPU, the defaults are wrong in three specific ways:
 
-`DROVI_DB_POOL_MAX` is **2** in production. The Supabase free pooler is shared; a big pool
-starves every other client of the project, including the SQL editor you would use to
-diagnose it.
+| Setting | Why |
+| --- | --- |
+| Cap the heap by **percentage of the cgroup limit**, not an absolute figure | reads the container's actual limit, so changing plan needs no rebuild |
+| **SerialGC** below ~2 GB | a concurrent collector's background threads cost more on a fraction of a CPU than its pauses save |
+| **Stop tiered compilation at level 1** | skips the optimising compiler: slower steady state, much faster startup — and on an instance that spins down, startup is what users experience |
+| A **very small** connection pool | sized against the database's connection limit, not expected load |
 
-## Secrets
+## Cold starts are a product problem, not an ops one
 
-Every secret is entered once in the Render dashboard. `render.yaml` declares them with
-`sync: false`, which means "prompt me, never store in git". No secret value appears in any
-repo.
+A free instance spins down after ~15 minutes idle and takes 30–60 seconds to come back. A
+browser user sees a slow page; **a machine calling your API sees a timeout.** If anything
+automated depends on the service, a keep-alive ping is load-bearing infrastructure, not
+hygiene — and it doubles as what keeps a free database from pausing after a week idle.
+
+Budget it: 750 instance-hours a month against 744 hours in a 31-day month leaves about six
+hours of margin for redeploys. Running two services on one free account does not fit.
 
 ## Rollback
 
-Render → the service → **Deploys** → redeploy a previous successful build. See
-`runbook.md` for the schema caveat.
+Host dashboard → the service → **Deploys** → redeploy a previous successful build.
+**Never roll back a migration.**
