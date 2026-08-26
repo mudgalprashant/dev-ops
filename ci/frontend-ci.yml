@@ -1,5 +1,5 @@
 # Frontend CI — lint, typecheck, test, build.
-# OWNER: dev-ops (this repo). PLACEMENT: <project>-frontend/.github/workflows/ci.yml
+# OWNER: dev-ops (this repo). PLACEMENT: bidceleb-frontend/.github/workflows/ci.yml
 # Authored here, copied into the frontend repo — see ci/README.md.
 #
 # Every step tolerates a script that does not exist yet, so a docs-only push stays green

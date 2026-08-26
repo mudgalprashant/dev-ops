@@ -1,108 +1,163 @@
 ---
-title: Runbook
+title: Runbook — bidceleb
 status: current
 last_updated: 2026-08-26
-applies_to: [every repo in every project]
+applies_to: [bidceleb-backend]
 ---
 
-# Runbook
+# Runbook — bidceleb
 
-Every procedure assumes you can reach the database's SQL console and the host's dashboard.
+Every procedure assumes you can reach the Supabase SQL editor and the Render dashboard.
 **Most controls are database rows, deliberately, so you can act without waiting for a
-build.**
+build.** The universal procedures (credential leak, connection exhaustion, first deploy,
+rollback) are canonical on `main`; this file covers what is specific to this product.
 
-⚠️ Like [observability.md](observability.md), the incident list is **per project** — one
-procedure per silent failure named there. What follows is the shape of a good procedure,
-plus the handful of incidents that are genuinely universal.
+Ownership: money and integrity → here. "The board renders oddly" →
+[observability.md](observability.md). A schema or domain bug →
+`global-context/bidceleb-backend-context/playbooks/debug-failure.md`.
 
-## What a procedure must contain
+---
 
-1. **How you know it is happening** — the alert line, or the query that shows it.
-2. **The first action that stops the bleeding**, in one command, before any diagnosis.
-3. **How to verify that action took effect** — a query, not an assumption.
-4. **Then** the diagnosis: what causes this, ranked by likelihood.
-5. **How to resume**, and what to change so it does not recur at the same threshold.
+## Severity 1 — popularity is being minted without payment
 
-Ordering matters. A procedure that diagnoses before it stops the bleeding is a procedure
-written by someone who has never run it.
+The product is the board being true. This is the only incident that attacks that directly.
 
-## Kill switches
+**How you know:** `alert.webhookRejected` climbing, or settled boosts with no matching
+charge at the provider.
 
-Every subsystem that spends money or calls a third party needs one, and it must be a
-database row rather than a deploy.
+1. **Stop the bleeding first.** Rotate the webhook signing secret at the provider and in
+   Render, in that order. A forged-webhook attack ends the moment the old secret stops
+   verifying; every other step can wait.
+2. **Verify the rotation took**, rather than assuming — a saved Render variable restarts
+   the service, and a restart that failed leaves the old value running:
+   ```sql
+   SELECT provider_event_id, received_at, signature_valid
+   FROM payment_event ORDER BY received_at DESC LIMIT 20;
+   ```
+3. **Find the forged settlements.** Reconcile against the **provider's** record of charges,
+   never our own — our own is what the attacker wrote:
+   ```sql
+   SELECT b.id, b.celebrity_id, b.amount_cents, p.provider_ref, b.settled_at
+   FROM boost b JOIN payment p ON p.id = b.payment_id
+   WHERE b.status = 'SETTLED' AND b.settled_at > now() - interval '24 hours'
+   ORDER BY b.amount_cents DESC;
+   ```
+   Export the provider's charges for the same window and diff on `provider_ref`.
+4. **Reverse them as events, never as an `UPDATE`.** Insert the reversing rows so the
+   trigger moves `popularity_cents` and the ledger still reconciles afterwards. A manual
+   `UPDATE celebrity SET popularity_cents = …` fixes the display and breaks the invariant,
+   and the next drift check will "find" your correction as the bug.
+5. Only then work out how the secret leaked. **Rotate first, investigate second.**
 
-Write down, for each, exactly what it stops — the sentence people get wrong is the
-important one: **a spend kill switch stops *spending*, never *serving*.** The product keeps
-working; the metered thing is refused. If a kill switch takes the product down, it is an
-outage switch and people will hesitate to use it, which defeats the purpose.
+---
 
-⚠️ **If a configuration value is cached in process, the switch is not immediate.** Record
-the actual cache behaviour, verified against the code — not what the configuration
-*appears* to say. Where the effective delay is an accident rather than a design, say so, or
-the next person will build on it.
+## Severity 1 — payments succeeded but popularity did not move
 
-## Universal incident: a credential leaked
+People have paid and the board is unchanged. Every minute here is a refund request and a
+public accusation.
 
-**Rotate first. Investigate second.** In that order, always. Purging git history is
-cleanup, never remediation. See [secrets.md](secrets.md).
+**How you know:** `alert.settlementGap`, or a support message with a receipt attached.
 
-## Universal incident: connection exhaustion
+1. Establish which side is broken — ours or the delivery:
+   ```sql
+   SELECT count(*) FROM payment_event WHERE received_at > now() - interval '1 hour';
+   SELECT status, count(*) FROM boost WHERE created_at > now() - interval '1 hour' GROUP BY 1;
+   ```
+   Events arriving but boosts stuck `PENDING` → our handler. **No events at all** → the
+   provider cannot reach us; check the endpoint URL registered at the provider, then that
+   the service is up rather than cold-starting.
+2. **Replay from the provider's dashboard.** The handler is idempotent on
+   `(provider, provider_event_id)`, so replaying the whole window is safe and is almost
+   always the fix. Replay everything since the gap opened; do not hand-pick.
+3. If the handler itself is failing, grep its correlation id and read the actual exception.
+   A common cause is a schema change deployed ahead of the code that writes it.
+4. **Do not settle by hand while the cause is unknown.** A manual settlement plus a
+   successful replay produces a double boost, and the user who was under-credited is now
+   over-credited — which nobody reports.
+5. Resume, then confirm the gap closed with the settlement-gap query in
+   [observability.md](observability.md).
 
-Symptom is a pool timeout under load. The pool is small **on purpose** — exhausting a
-shared pooler takes out the SQL console you would use to diagnose it.
+⚠️ **Never settle a boost from the browser's success redirect,** however tempting it is
+during this incident. The redirect is a hint that the user came back, not evidence that
+money moved; anyone can visit it.
+
+---
+
+## Severity 2 — the board disagrees with the ledger
+
+**How you know:** `alert.ledgerDrift`, or the reconciliation query in
+[observability.md](observability.md) returning rows.
+
+1. Take the drift query's output and look at *direction*: board above ledger means
+   something incremented without a boost row; board below means a settlement did not
+   propagate.
+2. Suspect, in order: a direct SQL write that bypassed the trigger (the usual cause), a
+   refund applied without a reversing event, a migration that rebuilt the table without
+   restoring the trigger.
+3. Recompute from the ledger, because **the ledger is the source of truth and the counter
+   is a cache of it**:
+   ```sql
+   UPDATE celebrity c
+   SET popularity_cents = x.total, boost_count = x.n
+   FROM (
+     SELECT celebrity_id, coalesce(sum(amount_cents), 0) AS total, count(*) AS n
+     FROM boost WHERE status = 'SETTLED' GROUP BY celebrity_id
+   ) x
+   WHERE x.celebrity_id = c.id AND c.popularity_cents <> x.total;
+   ```
+4. Confirm the trigger still exists before declaring it fixed. Recomputing without
+   restoring the trigger means being back here tomorrow.
+
+---
+
+## Severity 2 — a chargeback, or a fraudulent boost
+
+1. Reverse it as an event (a `REFUNDED` boost row), never by editing the counter.
+2. Leave the original rows in place. **The boost ledger is financial: revoke, never
+   delete.** Log rows and disputes reference those ids.
+3. If one payer accounts for several, check whether the card is being tested against us —
+   a run of small boosts from one source is card-testing, not enthusiasm.
+
+## Severity 2 — the payment provider is down
+
+1. `UPDATE app_config SET value = 'false' WHERE key = 'payments.enabled';`
+2. **This stops taking money. It never stops serving the board.** The leaderboard, the
+   tabs and every celebrity page keep working; the Boost button shows a maintenance state.
+   If the board goes down when this flips, that is a bug — fix it before the next outage,
+   because a kill switch people hesitate to use is not a kill switch.
+3. Verify no new checkouts are being created, then re-enable and confirm one test boost
+   settles end to end before announcing anything.
+
+## Severity 3 — the moderation queue has stalled
 
 ```sql
-SELECT count(*), state FROM pg_stat_activity GROUP BY state;
+SELECT id, proposed_name, created_at, now() - created_at AS waiting
+FROM listing_submission WHERE status = 'PENDING' ORDER BY created_at;
 ```
+Each row is someone who paid $100 and is waiting. **Refund rather than let one age past a
+week** — a slow approval is a bad experience, an ignored payment is a chargeback and a
+public complaint.
 
-Look for a network call inside a transaction; that is a code bug, not a capacity problem.
-**Do not raise the pool size without recomputing the budget against the database's limit.
-That is the classic free-tier outage.**
+## Severity 3 — a takedown request about a listed person
 
-## Universal incident: the database is filling up
+1. `UPDATE celebrity SET status = 'HIDDEN' WHERE slug = :slug;` — it leaves the board
+   immediately.
+2. **Never hard-delete.** The boost rows are financial records and must survive; a delete
+   also silently destroys the evidence you would need if the request is contested.
+3. Record who asked and on what basis. Then decide, unhurried, whether it comes back.
 
-Find the biggest consumer, then check it against expectations:
+## The database is filling up
 
-```sql
-SELECT relname, pg_size_pretty(pg_total_relation_size(relid)) AS total
-FROM pg_catalog.pg_statio_user_tables ORDER BY pg_total_relation_size(relid) DESC LIMIT 10;
-```
+The universal procedure on `main` applies. Here the growing table is almost always
+`payment_event`, which stores raw webhook payloads. **Its purge job is part of the payments
+slice, not a follow-up** — retention with no job behind it is decorative. Keep enough
+history to reconcile a dispute (90 days is the usual chargeback window), delete in batches,
+then `VACUUM`.
 
-⚠️ It is almost always a per-request log or event table whose purge job was never written.
-Delete in batches, then `VACUUM` — a single large `DELETE` on a constrained instance is its
-own incident.
+## A traffic spike
 
-## Universal incident: service down, or constantly cold-starting
-
-Check the health endpoint. If cold starts are frequent, the keep-alive has stopped —
-check its run history before looking anywhere else.
-
-## Universal: first deploy against a managed Postgres
-
-Four failures happen in this order, and each reads as something else:
-
-1. **`'url' must start with "jdbc"`** — a libpq URL where a JDBC one belongs. It surfaces
-   from inside the migration tool, so it reads like a migration bug.
-2. **`password authentication failed for user "…"`** — **read the username in the message.**
-   If it is the bare user rather than the project-qualified one, the password is not the
-   problem: the username variable never reached the app and a local default took over.
-3. **`Found non-empty schema(s) "public" but no schema history table`** — a managed
-   provider's `public` schema is not empty on a new project. Set baseline-on-migrate **and
-   an explicit baseline version of 0**. ⚠️ The second half is the load-bearing one: the
-   baseline version defaults to 1 and only migrations *above* it are applied, so at the
-   default your first migration is silently skipped.
-4. **`No open ports detected`** — not a port problem. The host is still scanning while the
-   app dies during startup. **Always a symptom, never the cause** — scroll up for the real
-   exception.
-
-## Rollback
-
-Host dashboard → the service → **Deploys** → redeploy a previous successful build.
-**Never roll back a migration** — write a fix-forward one. See [deployment.md](deployment.md).
-
-## Escalation
-
-Anything involving a suspected credential compromise: **rotate first, investigate second.**
-Anything involving money moving incorrectly: stop the subsystem, then reconcile from the
-ledger. Never reconcile by hand-editing the balance — record the correcting event, so the
-ledger and the balance still agree afterwards.
+The board is read-heavy and public; the reclaim loop means a spike arrives all at once from
+one social post. In order: confirm the leaderboard is being served from cache (ETag hit
+rate), confirm the pool is not exhausted, and only then consider the host's paid instance.
+**Do not raise `BIDCELEB_DB_POOL_MAX` to cope with a spike** — exhausting the shared
+Supabase pooler takes out the SQL editor you would use to diagnose it.

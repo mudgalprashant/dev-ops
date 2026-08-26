@@ -1,10 +1,10 @@
-# dev-ops — `main`. A project's branch fills in PROJECT and the backend directory.
+# dev-ops — `bidceleb` branch.
 #
 # There is deliberately no `make up`. The backend's tests start a real database binary
 # that arrives as a build dependency, so there is nothing to install and nothing to
 # start. A `make up` that boots an unused service is a trap, not a reference.
 
-PROJECT ?= CHANGE_ME
+PROJECT ?= bidceleb
 PREFIX  ?= $(shell echo $(PROJECT) | tr 'a-z-' 'A-Z_')
 BACKEND ?= ../$(PROJECT)-backend
 
