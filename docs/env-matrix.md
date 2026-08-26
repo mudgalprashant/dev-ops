@@ -30,7 +30,7 @@ The three rules, the naming convention and the Postgres pooler traps are canonic
 
 | Variable | local | test | prod | Secret | Purpose / verify |
 | --- | --- | --- | --- | --- | --- |
-| `BIDCELEB_DB_URL` | ✅ | | ✅ | 🟡 | JDBC form, port **5432**, `?sslmode=require` |
+| `BIDCELEB_DB_URL` | ✅ | | ✅ | 🟡 | JDBC form, port **5432**, `?sslmode=require`. **Host copied from the dashboard, never typed** — see below |
 | `BIDCELEB_DB_USERNAME` | ✅ | | ✅ | 🟡 | `postgres.<project-ref>` — the qualified form |
 | `BIDCELEB_DB_PASSWORD` | ✅ | | ✅ | ✅ | full read/write over the boost ledger |
 | `BIDCELEB_DB_POOL_MAX` | ✅ | | ✅ | ❌ | **2 in production.** Sized against Supabase's limit, not load |
