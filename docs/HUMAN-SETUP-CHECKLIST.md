@@ -32,7 +32,7 @@ stays broken until it is done.
 
 ## Before deploying
 
-### 1. Cloudflare account
+### 1. Cloudflare account ✅ done
 - **Why:** hosts the Worker, the Durable Objects and the client, all on the free plan.
 - **Do:** [dash.cloudflare.com](https://dash.cloudflare.com) → Sign up. **No payment method
   is requested and none should be added.** Copy the **Account ID** from the right-hand side
@@ -126,13 +126,16 @@ that assert cell counts will tell you what else to update.
 
 ## Completion gate
 
-- [ ] Cloudflare account exists, **no card on it**, Account ID copied
+- [x] Cloudflare account exists, **no card on it**, Account ID copied
 - [ ] API token created from the **Workers template**, stored only in GitHub
 - [ ] Both secrets set on `codecreeds/cellbreak`
 - [ ] `CODEOWNERS` names a handle with access to the `codecreeds` org
 - [ ] Visibility decided
 - [ ] Branch protection on `main` and `dev`, **verified by a rejected push**
 - [ ] `pnpm test` green locally
-- [ ] A deploy has succeeded and two browsers have played each other on the live URL
+- [x] A deploy has succeeded
+- [ ] **Redeployed since phase 6** — the live Worker is older than the code, and the next
+      deploy carries migration `v2`
+- [ ] Two browsers have played each other on the live URL
 
 Anything you could not complete → say so; it is tracked as `UNKNOWN`, never guessed.

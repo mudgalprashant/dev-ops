@@ -64,9 +64,12 @@ The two local modes and what each is for are in [env-matrix.md](env-matrix.md).
 Follow [HUMAN-SETUP-CHECKLIST.md](HUMAN-SETUP-CHECKLIST.md). The first `wrangler deploy`
 creates the Durable Object namespace from the `migrations` block in `wrangler.jsonc`.
 
-⚠️ **The migration tag is `v1` with `new_sqlite_classes`, and that is load-bearing.**
-SQLite-backed Durable Objects are the kind available on the free plan; the older key-value
-backend is not. Never edit an applied migration tag — add a new one.
+⚠️ **The migration tags use `new_sqlite_classes`, and that is load-bearing.** SQLite-backed
+Durable Objects are the kind available on the free plan; the older key-value backend is not.
+
+There are two tags now: `v1` created `RoomDO`, and `v2` adds `StatsDO` for the visitor
+count. **Never edit an applied tag** — `v1` is already live, so a new class arrives as a
+new tag. Migrations apply on deploy; there is nothing separate to run.
 
 ## Rollback
 

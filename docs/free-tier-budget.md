@@ -13,8 +13,18 @@ Sorted by **how soon you hit it**, which is the only ordering that helps.
 | --- | --- | --- | --- | --- | --- |
 | 1 | **Durable Object requests** | ~3M/month, with inbound WebSocket messages billed **20:1** → ~60M messages | every join, move, config change and reconnect | requests fail; **suspends, never bills** | the protocol already sends a cell index, not a board. Next lever is batching room broadcasts |
 | 2 | **Worker requests** | 100k/day | page loads, asset fetches, `POST /api/rooms` | same | assets are cached at the edge; the realistic driver is room creation, not play |
-| 3 | **Durable Object storage** | 1 GB | one small record per live room | writes fail | rooms self-delete 30 min after the last socket closes |
+| 3 | **Durable Object storage** | 1 GB | one small record per live room, plus one integer for the visitor count | writes fail | rooms self-delete 30 min after the last socket closes |
 | 4 | **GitHub Actions** | unlimited public / 2,000 min per month private | CI and deploys | queued | keep the repo public; the whole run is ~2 minutes |
+
+## The visitor counter
+
+One Durable Object, holding one integer, written **once per browser** rather than once per
+page load. Every visitor reads it; almost none write it, and reads carry a 30-second
+cache header.
+
+⚠️ It is a **single object**, so every write serialises through it. That is the correct
+trade at this size and would become the wrong one if it ever counted page loads or events
+instead — which is exactly the change to think twice about.
 
 ## What this means in practice
 
