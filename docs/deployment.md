@@ -1,69 +1,74 @@
 ---
-title: Deployment
+title: Deployment — Cellbreak
 status: current
-last_updated: 2026-08-26
-applies_to: [every repo in every project]
+last_updated: 2026-08-27
+applies_to: [cellbreak]
 ---
 
 # Deployment
 
+## One artefact, one origin
+
+`wrangler deploy` publishes **the Worker and the client together** as a single version. The
+client is not a separate site: `apps/web/dist` is uploaded as the Worker's static assets, so
+`https://<worker>.workers.dev/` serves `index.html` and `/api/*` reaches the same code.
+
+That is the whole reason there is no CORS configuration, no second host to keep awake, and
+no way for the client and the server to be at different versions on the origin.
+
+```
+push to cellbreak-dev  ──▶  CI: install, test, typecheck, build          (no deploy)
+merge to cellbreak     ──▶  CI: the same, then `wrangler deploy`         (deploy)
+```
+
+## The order that matters
+
+```
+pnpm install
+pnpm test
+pnpm typecheck
+pnpm --filter @cellbreak/web build       ← BEFORE the next line, always
+pnpm --filter @cellbreak/server deploy
+```
+
+⚠️ **`wrangler deploy` uploads whatever is already in `apps/web/dist`.** It does not build
+the client, and it does not warn you that the directory is stale. Deploying without
+building ships the previous client against the new Worker — which is exactly the
+old-client/new-protocol failure in [observability.md](observability.md) §4, caused on
+purpose by accident. `ci/deploy.yml` encodes the order; match it when deploying by hand.
+
+## What a deploy does to games in flight
+
+A new Worker version restarts Durable Objects. Rooms reload from storage, so:
+
+| | What players see |
+| --- | --- |
+| In a lobby | a brief reconnect, then the lobby again. Nothing lost |
+| Mid-game | reconnect, board resumes at the last settled position |
+| **Mid-cascade** | the board **jumps** to the settled position — the animation is client-side and does not survive |
+| Already-loaded tabs | keep the **old** client until they reload |
+
+None of it loses a game, and the last row is the one that causes support questions. Deploy
+between games when you can.
+
 ## Environments
 
-| Env | Where | Database | Deploy trigger |
-| --- | --- | --- | --- |
-| local | your machine | a local one, or none — tests start their own | run the app directly |
-| test | the CI runner | a real database the test suite starts itself | every push |
-| prod | one free web service on the host | the managed free tier | push to the release branch |
+**There is one.** No staging, and that is deliberate: a staging environment for a stateless
+game with no database and no data migrations would test nothing that `wrangler dev` does not
+test locally, while doubling the deploy surface.
 
-**There is deliberately no staging.** A second service and a second database would consume
-the free allowances production depends on. When a change is risky enough to need staging,
-that is a signal about the change, not about the environments.
+The two local modes and what each is for are in [env-matrix.md](env-matrix.md).
 
-## How a deploy happens
+## First deploy
 
-1. The release PR merges into the release branch.
-2. The host builds the `Dockerfile` (multi-stage; the artifact is compiled inside the image).
-3. The container starts as a **non-root** user; pending migrations apply at startup.
-4. A health check gates the switchover.
+Follow [HUMAN-SETUP-CHECKLIST.md](HUMAN-SETUP-CHECKLIST.md). The first `wrangler deploy`
+creates the Durable Object namespace from the `migrations` block in `wrangler.jsonc`.
 
-> **The `Dockerfile` *is* the deploy path, not a portability hatch.** Keeping deployment as
-> a Dockerfile rather than provider-specific configuration is what makes changing host
-> cheap — and hosts do get changed.
-
-## One instance means no blue-green
-
-The new container starts while the old one is still serving. Two consequences, both
-non-negotiable:
-
-- **A migration must be compatible with the previously running version.** Add a column
-  before anything writes to it; never rename or drop in the same release that stops using
-  it. Two releases, always.
-- **INVARIANT: migrations are forward-only. Never roll back a migration; write a
-  fix-forward one.** Rolling the *image* back is safe only if the older image tolerates the
-  newer schema — which is exactly what the previous rule guarantees.
-
-## Resource tuning on a small instance
-
-At 512 MB and a fraction of a CPU, the defaults are wrong in three specific ways:
-
-| Setting | Why |
-| --- | --- |
-| Cap the heap by **percentage of the cgroup limit**, not an absolute figure | reads the container's actual limit, so changing plan needs no rebuild |
-| **SerialGC** below ~2 GB | a concurrent collector's background threads cost more on a fraction of a CPU than its pauses save |
-| **Stop tiered compilation at level 1** | skips the optimising compiler: slower steady state, much faster startup — and on an instance that spins down, startup is what users experience |
-| A **very small** connection pool | sized against the database's connection limit, not expected load |
-
-## Cold starts are a product problem, not an ops one
-
-A free instance spins down after ~15 minutes idle and takes 30–60 seconds to come back. A
-browser user sees a slow page; **a machine calling your API sees a timeout.** If anything
-automated depends on the service, a keep-alive ping is load-bearing infrastructure, not
-hygiene — and it doubles as what keeps a free database from pausing after a week idle.
-
-Budget it: 750 instance-hours a month against 744 hours in a 31-day month leaves about six
-hours of margin for redeploys. Running two services on one free account does not fit.
+⚠️ **The migration tag is `v1` with `new_sqlite_classes`, and that is load-bearing.**
+SQLite-backed Durable Objects are the kind available on the free plan; the older key-value
+backend is not. Never edit an applied migration tag — add a new one.
 
 ## Rollback
 
-Host dashboard → the service → **Deploys** → redeploy a previous successful build.
-**Never roll back a migration.**
+[runbook.md](runbook.md#roll-back), including the trap that `wrangler rollback` may not
+take the client bundle back with it.

@@ -1,55 +1,58 @@
 ---
-title: The free stack — what we use, and why
+title: The free stack — Cellbreak
 status: current
-last_updated: 2026-08-26
-applies_to: [every repo in every project]
+last_updated: 2026-08-27
+applies_to: [cellbreak]
 ---
 
 # The free stack
 
-The baseline every project starts from. A project's own branch records what it actually
-chose and what it ruled out.
+Everything is free, and — the property that actually matters — **nothing here takes a
+card**. Cloudflare's free plan is the whole hosting story.
 
-| Concern | Default choice | Why |
+| Concern | Choice | Why this one |
 | --- | --- | --- |
-| App host | **Render** free web service | **Chosen for its billing model first, specs second** — no card required, and hitting a limit *suspends the service rather than charging you* |
-| TLS + reverse proxy | the host provides both | managed certificate, nothing to renew |
-| Database | **Supabase** free Postgres, **session pooler** | 500 MB; pauses after 7 days of zero requests |
-| Cache | in-process | no Redis at one instance: no network hop, nothing extra to keep alive |
-| Scheduling | in-process scheduling + a database cron for the keep-alive | |
-| Auth | **Firebase Authentication** | removes password hashing, token rotation, reuse detection and session storage from scope entirely |
-| CI | **GitHub Actions** | unlimited minutes on public repos |
-| Integration tests | a **real database binary as a build dependency** | no Docker required, and no dialect gap |
-| Error tracking | **Sentry** free | |
-| Uptime | **UptimeRobot** or **cron-job.org** | doubles as the keep-alive |
-| Frontend | **Next.js + React + TypeScript**, hosted on Render or Cloudflare | |
+| Client | **Vite + React 19 + TypeScript** | an SPA with nothing to server-render. Deviates from the baseline's Next.js default: there is no server-side data, no SEO surface beyond one page, and no route that benefits |
+| Board rendering | **Canvas 2D** | a cascade moves dozens of orbs at 60fps. React owns the menus and the lobby; the board is one canvas and a `requestAnimationFrame` loop |
+| Styling | plain CSS + custom properties | ~250 lines. A framework would be larger than the thing it styles |
+| Multiplayer | **Cloudflare Durable Objects** (SQLite-backed) | one object per room *is* the room: single-threaded, authoritative, addressable by code. WebSocket hibernation means an idle room holds no compute |
+| Hosting | **Cloudflare Workers static assets**, same Worker | one deploy, one origin, no CORS, no second service to keep alive |
+| Database | **none** | nothing outlives a room. See below — this is the decision the rest of the stack falls out of |
+| Auth | **none** | a nickname and a room code |
+| Tests | **Vitest** on the engine | 29 tests over the rules; the two integration checks live in `apps/*/test` |
+| CI/CD | **GitHub Actions** → `wrangler deploy` | unlimited minutes on a public repo |
 
-## Ruled out, and why — these are conclusions, not open questions
+## The decision everything else follows from: no database
 
-| Thing | Why not |
+Rooms are ephemeral. A game lasts minutes, nobody has an account, and there are no stats to
+keep. So room state lives in its own Durable Object's storage and is deleted 30 minutes
+after the last socket closes.
+
+Removing the database removed, in one move: a provider to sign up for, a connection pooler
+with three documented traps, a migration tool, a schema, a backup story, a 7-day idle-pause
+failure mode, and the largest secret in the project. **The cheapest infrastructure is the
+kind you did not deploy.**
+
+## Why not the baseline's Render + Supabase + Firebase
+
+Not a criticism of that stack — it is the right default for a product with users and data.
+Cellbreak has neither.
+
+| Baseline choice | Why not here |
 | --- | --- |
-| **Vercel Hobby** | non-commercial use only. A product with a paid tier breaches the terms. Ruled out on terms, not capability |
-| **Oracle Cloud free tier** | ruled out by *signup*, not specification — its fraud check rejects legitimate cards with no appeal. Do not spend another evening on it |
-| **GCP free tier** | silent-billing risk: the wrong boot-disk type or an egress overage bills without warning |
-| **An in-memory database for tests** | a real schema uses partial indexes, generated columns, JSON types and triggers. A test suite that cannot express the schema is not testing the schema |
-| **Docker for local development** | if the test suite starts its own database, there is nothing to install and nothing to start. A `make up` that boots an unused service is a trap, not a reference |
-| **Kubernetes** | nothing to orchestrate at one instance. The `Dockerfile` *is* the deploy path |
-| **An external secrets vault** | see [secrets.md](secrets.md) — it adds a bootstrap credential without removing a risk at this size |
+| **Render free web service** | ⚠️ **disqualifying, not merely worse.** It spins down after 15 minutes idle and cold-starts in 30–60s. A player who taps a cell and waits 45 seconds has not experienced a cold start, they have experienced a broken game. Durable Objects have no such state |
+| **Supabase** | there is nothing to persist |
+| **Firebase Auth** | there is nobody to authenticate |
+| **Vercel** | Hobby is non-commercial only — ruled out on terms, as it was before |
+| **An uptime monitor** | its job in the baseline is keeping a free service awake. Nothing here sleeps, and nothing here pauses after 7 idle days |
 
-## Traps that are not about quota
+## The one thing to actually watch
 
-- **A free database pauses after ~7 days with zero requests.** The uptime monitor is what
-  keeps it awake — that is infrastructure, not hygiene.
-- **A free web service spins down after ~15 minutes idle**, and its cold start reads as a
-  *timeout* to any machine calling it.
-- **The host suspends rather than bills** — keep it that way by not putting a card on the
-  account.
-- **Phone/SMS authentication is billed per message** even inside a free monthly-active-user
-  allowance. Do not enable phone sign-in casually.
-- **A free AI tier may train on your content**, and human reviewers may read it. Move to a
-  paid tier before any real customer's material passes through.
+Not cost — **abuse**. `POST /api/rooms` creates a Durable Object with no authentication in
+front of it, because requiring one would defeat the point of an invite link. That is a free
+object-creation endpoint on the public internet.
 
-## The rule underneath all of it
-
-Prefer the provider that **suspends** over the provider that **bills**. Every free tier
-runs out; the only question is whether you find out from a dashboard or from a statement.
+It is bounded today by the room's own 30-minute self-deletion and by Cloudflare's per-plan
+request ceiling, which suspends rather than bills. It is **not** bounded by anything we
+wrote. See [observability.md](observability.md) for what this looks like when it happens
+and [runbook.md](runbook.md) for what to do about it.

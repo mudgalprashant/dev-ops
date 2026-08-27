@@ -1,52 +1,64 @@
-# dev-ops — `main`
+# dev-ops — Cellbreak infrastructure & developer operations
 
-**Environment/config contract, CI/CD definitions, and operational docs.** This is a shared
-repo: it carries **one long-lived branch per project**, plus this `main` branch for content
-that is true regardless of project.
+Environment contract, CI/CD definitions, and operational docs for **Cellbreak**. This is
+the `cellbreak` branch of a shared repo — it is the **release line** for this project, and
+`cellbreak-dev` is its integration branch.
 
-> **You are on `main`. Nothing project-specific belongs here.** Project work happens on
-> that project's branch, and is never merged back. See
-> [docs/branching-strategy.md](docs/branching-strategy.md).
+> ⚠️ **Never commit to `cellbreak` and never open a PR into it except the release PR from
+> `cellbreak-dev`.** In this repo `cellbreak` plays the role `main` plays in a product repo.
+> See [docs/branching-strategy.md](docs/branching-strategy.md).
 
-## Branches
+**Cellbreak is Chain Reaction for the browser** — the Android game's rules and physics on a
+flat 2D grid. 2–8 players, three grid shapes in two densities, local pass-and-play, and
+online rooms with a code and an invite link. Code lives in `codecreeds/cellbreak`.
 
-| Branch | Project | Repos covered |
-| --- | --- | --- |
-| `main` | — | the baseline every project branches from |
-| `drovi` / `drovi-dev` | Drovi — AI-generated API sandboxes | `drovi-backend`, `drovi-frontend` |
-| `bidceleb` / `bidceleb-dev` | bidceleb — pay-to-rank celebrity popularity board | `bidceleb-backend`, `bidceleb-frontend` |
+## The short version of the stack
 
-**Starting a new project? → [docs/NEW-PROJECT.md](docs/NEW-PROJECT.md).** Read it before
-creating any branch; step 1 is the one that gets skipped, and skipping it is unrecoverable
-without a rewrite.
+Everything is Cloudflare, on the free plan, with **no card on the account**. One Worker
+serves the client *and* the WebSocket API; one Durable Object per room holds the game.
+**There is no database, no auth provider and no second service** — which is why this
+directory is small. See [docs/free-stack.md](docs/free-stack.md).
 
 ## What lives here
 
 | Path | What |
 | --- | --- |
-| `docs/branching-strategy.md` | **Canonical branch model across all repos** |
-| `docs/NEW-PROJECT.md` | How to add a project to the shared repos, and the completion gate |
-| `docs/github-setup.md` | Making the rules real: visibility, default branch, protection |
-| `docs/secrets.md` | **Where secrets live, how to set them, how to rotate them** |
-| `docs/env-matrix.md` | The env-var contract: naming, classification, the pooler traps |
-| `docs/deployment.md` | How a build reaches production, and why there is no staging |
-| `docs/runbook.md` | The shape of a good procedure, plus the universal incidents |
-| `docs/observability.md` | How to work out what fails *silently* in a given product |
-| `docs/free-stack.md` | What we use for each concern, and what is ruled out |
-| `docs/free-tier-budget.md` | How to work out what runs out first |
-| `docs/HUMAN-SETUP-CHECKLIST.md` | The shape of the by-hand setup list |
-| `ci/*.yml` | GitHub Actions, authored here and **copied** into the repo they build |
-| `.env.example` | The env-var contract — **names only, never values** |
+| `docs/HUMAN-SETUP-CHECKLIST.md` | **Everything a person must do by hand**, ordered. Start here |
+| `docs/free-stack.md` | What is used for each concern, and what Render/Supabase/Firebase were ruled out for |
+| `docs/free-tier-budget.md` | What runs out first — and why the real limit is not in the table |
+| `docs/observability.md` | **The seven ways this game fails silently** |
+| `docs/runbook.md` | One procedure per silent failure, plus deploy and rollback |
+| `docs/deployment.md` | One artefact, one origin, and the build step that is load-bearing |
+| `docs/secrets.md` | The inventory: one CI token |
+| `docs/env-matrix.md` | The runtime contract — which is empty, on purpose |
+| `docs/branching-strategy.md` | Canonical branch model |
+| `docs/github-setup.md` | Turning the conventions into enforcement |
+| `ci/*.yml` | GitHub Actions, authored here and **copied** into the product repo |
+| `.env.example` | Names only, never values — and here, none |
+| `Makefile` | `make serve`, `make deploy`, `make tail` |
+
+## Current state, honestly
+
+| Thing | State |
+| --- | --- |
+| Engine, client, Worker | written and tested — 29 engine tests, plus two integration checks |
+| Local play | working, all six shape × size boards |
+| Online play | working locally; two-tab check passes end to end |
+| Cloudflare account | **does not exist — human task #1** |
+| Deployed | **never.** Nothing has been published |
+| Branch protection | not configured |
+
+Canonical cross-repo decisions: `global-context`, branch `cellbreak`, `shared/decisions.md`.
 
 ## What does NOT live here
 
-Application code, and the app repos' own docs. Canonical cross-repo *decisions* live in
-`global-context`, on the project's branch, in `shared/decisions.md`.
+Application code, and the product repo's own docs.
 
 ## Deliberately absent
 
 | Thing | Why |
 | --- | --- |
-| A local Docker stack (`docker-compose.yml`, `make up`) | the test suite starts its own database. A `make up` that boots an unused service is a trap, not a reference |
-| An SSH/systemd deploy workflow | the `Dockerfile` plus the host's build-from-repo is the one deploy path. Two contradictory paths in one repo is how a deploy goes to the wrong place |
-| Anything project-specific | that is what the project branches are for |
+| A Docker stack | there is nothing to run but `wrangler dev`, which starts the Worker, the Durable Objects and the client in one command |
+| A database runbook | there is no database |
+| A staging environment | one environment on purpose — [docs/deployment.md](docs/deployment.md) |
+| An uptime monitor | nothing sleeps and nothing pauses |

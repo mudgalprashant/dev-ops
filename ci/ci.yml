@@ -1,0 +1,41 @@
+# Cellbreak — CI. Authored in dev-ops, COPIED to cellbreak/.github/workflows/ci.yml.
+#
+# ⚠️ The job name `ci` is the string selected in branch protection as the required
+# status check. Renaming it here means renaming it in the GitHub UI too.
+
+name: ci
+
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev, main]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The engine is where correctness lives; it runs first so a rules
+      # regression fails before anything slower has started.
+      - run: pnpm test
+
+      - run: pnpm typecheck
+
+      # Also proves the client builds, which the deploy depends on.
+      - run: pnpm --filter @cellbreak/web build

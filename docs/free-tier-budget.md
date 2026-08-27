@@ -1,54 +1,40 @@
 ---
-title: Free-tier budget — what runs out first
+title: Free-tier budget — Cellbreak
 status: current
-last_updated: 2026-08-26
-applies_to: [every repo in every project]
+last_updated: 2026-08-27
+applies_to: [cellbreak]
 ---
 
 # Free-tier budget
 
-A project's own branch answers this question **in order, for that product**. The ordering
-is what matters: knowing the ceilings is useless without knowing which one you hit first.
+Sorted by **how soon you hit it**, which is the only ordering that helps.
 
-## The template
-
-| # | Limit | Ceiling | What consumes it | What happens at the wall | Mitigation |
+| # | Limit | Ceiling (free) | What consumes it | At the wall | Mitigation |
 | --- | --- | --- | --- | --- | --- |
-| 1 | | | | | |
+| 1 | **Durable Object requests** | ~3M/month, with inbound WebSocket messages billed **20:1** → ~60M messages | every join, move, config change and reconnect | requests fail; **suspends, never bills** | the protocol already sends a cell index, not a board. Next lever is batching room broadcasts |
+| 2 | **Worker requests** | 100k/day | page loads, asset fetches, `POST /api/rooms` | same | assets are cached at the edge; the realistic driver is room creation, not play |
+| 3 | **Durable Object storage** | 1 GB | one small record per live room | writes fail | rooms self-delete 30 min after the last socket closes |
+| 4 | **GitHub Actions** | unlimited public / 2,000 min per month private | CI and deploys | queued | keep the repo public; the whole run is ~2 minutes |
 
-Fill it in **sorted by how soon you hit it**, not by size. Then write down the answer to
-one question for each row: *does hitting this suspend the service, degrade it, or bill me?*
+## What this means in practice
 
-## Quantified ceilings of the default stack
+A full 8-player game is on the order of a few hundred WebSocket messages. Against ~60M
+messages a month, the request ceiling is not a limit this game reaches by being *played* —
+it is a limit it reaches by being *abused*.
 
-Verify each against the provider before relying on it; free tiers move.
+⚠️ **So the real budget line is not in the table.** `POST /api/rooms` is unauthenticated by
+design, and a script can create rooms far faster than players can fill them. Each one is a
+Durable Object that lives for 30 minutes. That is the mechanism by which every row above
+gets consumed at once, and it is the thing to watch. See [observability.md](observability.md).
 
-| Provider | Free ceiling |
-| --- | --- |
-| Render web service | 512 MB RAM, 0.1 CPU, 750 instance-hours/month, 100 GB bandwidth |
-| Supabase | 500 MB database, 1 GB file storage, 5 GB egress, 2 projects |
-| Firebase Spark | ~3,000 daily active users |
-| GitHub Actions | unlimited on public repos; 2,000 minutes/month private |
-| Sentry | ~5,000 errors/month |
-| UptimeRobot | 50 monitors at 5-minute intervals |
+## Verified
 
-⚠️ 750 instance-hours against **744 hours in a 31-day month** is roughly six hours of
-margin. One always-on free service fits; two do not.
-
-## The three that catch people out
-
-1. **Unbounded log or event tables.** Anything that writes a row per served request grows
-   without limit and will hit the database ceiling long before traffic hits any other one.
-   **Write the purge job in the same change that adds the table** — a retention setting
-   with no job behind it is decorative, and it is always discovered during an incident.
-2. **A rate limit is a wall, not a bill.** Requests-per-minute ceilings on third-party APIs
-   fail the request rather than charging you, so a job that fans out breaks where a job
-   that paces itself succeeds.
-3. **Memory is the tightest technical limit.** If the service OOMs, the honest fix is
-   usually the host's smallest paid instance, not a week of tuning.
+Checked against Cloudflare's own documentation in August 2026: Durable Objects have been on
+the free plan since April 2025, SQLite-backed, and inbound WebSocket messages bill at 20:1.
+Re-check before relying on the headroom; free tiers move.
 
 ## Reviewing this
 
-Re-check when traffic changes by an order of magnitude, when a new table starts growing
-per-request, or when a provider changes its plans. A budget nobody has re-read in six
-months is a guess.
+Re-read when a change starts sending messages per *frame* rather than per *move* — a
+spectator feed, a live cursor, a chat — because that is what turns row 1 from theoretical
+into the first wall.

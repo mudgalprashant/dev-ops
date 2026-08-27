@@ -1,55 +1,30 @@
-# CI/CD workflows — authored here, placed in the app repos
+# CI definitions
 
-`dev-ops` **owns** CI/CD, but GitHub Actions workflows must physically live inside the repo
-they build. So these files are authored and version-controlled here (one source of truth)
-and **copied** into each app repo under `.github/workflows/`.
+Workflows are **authored here and copied** into the repo they build. GitHub only runs a
+workflow from `.github/workflows/` on the repo's own default branch, so a workflow cannot
+live in `dev-ops` and act on `cellbreak`.
 
-| Source (this repo) | Destination | Owner repo |
+| File | Copy to | Runs |
 | --- | --- | --- |
-| `ci/backend-ci.yml` | `<project>-backend/.github/workflows/ci.yml` | the backend repo |
-| `ci/frontend-ci.yml` | `<project>-frontend/.github/workflows/ci.yml` | the frontend repo |
+| `ci.yml` | `cellbreak/.github/workflows/ci.yml` | every PR and push to `dev` or `main` |
+| `deploy.yml` | `cellbreak/.github/workflows/deploy.yml` | push to `main`, or by hand |
 
-Copy command, run from the **destination** repo, on branch `dev`:
+Editing one here does nothing until it is copied. Change both, in the same change.
 
-```bash
-mkdir -p .github/workflows
-cp ../dev-ops/ci/backend-ci.yml .github/workflows/ci.yml
-```
+## Two names that must not drift
 
-⚠️ **Do not write into a repo another person or agent is actively editing without saying
-so first.** Coordinate the placement, then copy. Two people editing one workflow in two
-repos is how a pipeline silently stops matching its source of truth.
+- **The CI job is called `ci`.** That exact string is what branch protection requires as a
+  status check.
+- **The PR-guard job is called `release-prs-come-from-dev`.** Same reason, in
+  `.github/workflows/pr-guard.yml` on this repo's own project branch.
 
-⚠️ **Edited in one place only.** If a workflow is changed in the app repo, port the change
-back here in the same session or the two diverge — and the copy in the app repo is the one
-that runs, so `dev-ops` becomes confidently wrong.
+A check cannot be marked *required* until it has run at least once, so protection is
+configured in two passes — see [../docs/github-setup.md](../docs/github-setup.md).
 
-## What each pipeline does
+## Deliberately absent
 
-- **backend-ci** — JDK (Temurin) + Gradle wrapper → `./gradlew build` (unit, slice and
-  integration tests) → migrations-apply-on-empty-DB check → format check → test-report
-  artifact. **No repo secrets required**: the test suite starts a real database binary that
-  arrives as a build dependency.
-- **frontend-ci** — `npm ci` → lint → typecheck → test → build. Each step is tolerant of a
-  script that does not exist yet, so a docs-only push stays green before the app has code.
-
-## Deploy workflows
-
-There is deliberately **no deploy workflow here.** The host builds from the repo itself on
-a push to the release branch (see [../docs/deployment.md](../docs/deployment.md)), so a
-deploy needs no CI job and no CI secret.
-
-⚠️ A previous version of this repo carried an SSH-to-systemd deploy workflow *and* a
-deployment doc describing a build-from-repo host. Two contradictory deploy paths in one
-repo is how a release goes somewhere nobody expected. If a project genuinely needs a push
-deploy, add it on that project's branch and correct `deployment.md` in the same change.
-
-## Secrets these workflows need
-
-**None.** Design it to stay that way: a test suite that needs a secret cannot run on a
-fork's pull request. If a workflow ever does need one, it goes in a GitHub **Environment**
-named `production` with required reviewers — never a repository secret, which any workflow
-including one added by a fork's PR can read. See [../docs/secrets.md](../docs/secrets.md).
-
-Branch policy: everything lands on the integration branch via PR + green CI; the release
-branch receives only the release PR.
+| Thing | Why |
+| --- | --- |
+| A lint workflow | TypeScript with `strict` plus `noUncheckedIndexedAccess` is the linter here. A second tool would repeat it |
+| A preview-deploy workflow | there is one environment on purpose — [../docs/deployment.md](../docs/deployment.md) |
+| A browser test in CI | `apps/web/test/online-check.mjs` needs Chrome and a running Worker. It is a pre-deploy check by hand, not a gate — running it in CI would make the pipeline the flakiest thing in the project |

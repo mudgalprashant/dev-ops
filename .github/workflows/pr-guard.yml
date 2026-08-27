@@ -3,48 +3,33 @@ name: PR guard
 # GitHub cannot restrict who OPENS a pull request, only who merges. This check is the
 # substitute: made a required status check, it blocks a merge the branch model forbids.
 #
-# ── On this branch (`main`) it enforces the one-way merge rule ──────────────────────────
-#   main ──────────▶ <project>   ALLOWED
-#   <project> ──✗──▶ main        NEVER — it leaks one project's content into every future
-#                                 project, because `main` is what a new project branches
-#                                 from. See docs/branching-strategy.md.
+# On this branch (`cellbreak`) it enforces the release rule: the only PR that may land on
+# the release branch is the release PR from `cellbreak-dev`.
 #
-# ── On a project branch, replace this file with the RELEASE guard ───────────────────────
-# Two strings change and nothing else:
-#     on.pull_request.branches:  [<project>]
-#     the comparison:            github.head_ref != '<project>-dev'
-#     the job name:              release-prs-come-from-dev      ← keep this exact string
-# The job name is what you select in branch protection as the required check; keeping it
-# identical across projects means not renaming it in the GitHub UI for every one.
+# ⚠️ Keep the job name `release-prs-come-from-dev` exactly as it is. It is the string
+# selected in branch protection as the required check; renaming it per project means
+# renaming it in the GitHub UI too, for no gain.
 
 on:
   pull_request:
-    branches: [main]
+    branches: [cellbreak]
 
 permissions:
   contents: read
 
 jobs:
-  main-stays-project-agnostic:
+  release-prs-come-from-dev:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: A project branch may never be merged into `main`
+      - name: The release branch takes one PR, and it comes from cellbreak-dev
         env:
           HEAD_REF: ${{ github.head_ref }}
           BASE_REF: ${{ github.base_ref }}
         run: |
           echo "head: $HEAD_REF  →  base: $BASE_REF"
-
-          # Project branches are the long-lived ones that are not main and not a
-          # feat/fix slice. Anything matching those prefixes is ordinary work.
-          case "$HEAD_REF" in
-            feat/*|fix/*|docs/*|ci/*|ops/*)
-              echo "OK — a work branch, not a project branch." ; exit 0 ;;
-          esac
-
-          echo "::error::'$HEAD_REF' looks like a project branch. A project branch is never merged into 'main' — main is what a NEW project branches from, so anything landing here is inherited by every future project. Rewrite the generic part onto a feat/ branch off main instead; do not cherry-pick, because that carries the original project's framing with it. See docs/branching-strategy.md."
+          if [ "$HEAD_REF" = "cellbreak-dev" ]; then
+            echo "OK — the release PR."
+            exit 0
+          fi
+          echo "::error::'$HEAD_REF' cannot merge into 'cellbreak'. Work lands on cellbreak-dev via a feat/ or fix/ PR first, and cellbreak-dev → cellbreak is the one release PR, merged by a human. See docs/branching-strategy.md."
           exit 1
