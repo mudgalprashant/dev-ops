@@ -11,8 +11,19 @@ applies_to: [cellbreak]
 invent secret values.
 
 **Nothing here blocks building or playing the game.** Local pass-and-play and online rooms
-both run entirely on your machine via `wrangler dev`. Items 1–3 block *deploying*, and
-nothing else.
+both run entirely on your machine via `wrangler dev`.
+
+**Item 1 alone gets you a live URL.** A first deploy by hand needs only a Cloudflare
+account — `wrangler login` authenticates through the browser, and no API token is involved:
+
+```bash
+cd apps/server && pnpm exec wrangler login
+cd ../.. && pnpm --filter @cellbreak/web build
+cd apps/server && pnpm exec wrangler deploy
+```
+
+Items 2–3 exist so **CI** can deploy without a human at a browser. Do them when you want
+pushes to `main` to publish themselves, not before your first deploy.
 
 Legend: **Feeds** = what it produces · **Verify** = how to know it worked · **Blocks** = what
 stays broken until it is done.
@@ -31,8 +42,11 @@ stays broken until it is done.
   have been on the free plan since April 2025, SQLite-backed. Nothing needs upgrading.
 - 📌 **Keeping a card off the account is the spend control.** Cloudflare suspends at the
   ceiling rather than billing, and with no card there is nothing to charge.
-- **Verify:** `cd apps/server && pnpm exec wrangler whoami` names your account.
-- **Blocks:** deploying.
+- **Verify:** `cd apps/server && pnpm exec wrangler login`, then `pnpm exec wrangler whoami`
+  names your account.
+- 📌 **The first deploy will offer to register a `*.workers.dev` subdomain.** Accept it —
+  that is the free hostname the game is served on, with a managed certificate.
+- **Blocks:** deploying, by hand or from CI.
 
 ### 2. Cloudflare API token
 - **Why:** lets CI publish. It is the **only real secret in the project**.
