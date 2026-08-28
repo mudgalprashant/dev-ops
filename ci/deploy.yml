@@ -1,46 +1,60 @@
-# Cellbreak — deploy. Authored in dev-ops, COPIED to cellbreak/.github/workflows/deploy.yml.
-#
-# Publishes the Worker AND the client as one version. `wrangler deploy` uploads whatever is
-# already in apps/web/dist and does not build it, so the build step below is load-bearing:
-# without it this workflow would ship the previous client against the new Worker.
+# Cell Quake — deploy on release. Authored in dev-ops, COPIED to cellquake/.github/workflows/deploy-release.yml.
 
-name: deploy
+name: Deploy to Cloudflare on Release
 
 on:
-  push:
-    branches: [main]
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  # Never let two deploys race; the later one wins and the earlier is abandoned.
   group: deploy-production
   cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: production
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
 
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm test
-      - run: pnpm typecheck
-      - run: pnpm --filter @cellbreak/web build
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
-      - name: Publish
+      - name: Run tests & typecheck
+        run: |
+          pnpm test
+          pnpm typecheck
+
+      - name: Build web application
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL || 'https://cellquake.parasm.workers.dev' }}
+          VITE_APP_VERSION: ${{ github.ref_name }}
+        run: pnpm --filter @cellquake/web build
+
+      - name: Deploy to Cloudflare Pages
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          pnpm dlx wrangler pages deploy apps/web/dist \
+            --project-name cellquake \
+            --branch main \
+            --commit-dirty=true
+
+      - name: Deploy Cloudflare Worker
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
