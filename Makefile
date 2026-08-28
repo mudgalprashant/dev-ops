@@ -19,16 +19,16 @@ check: ## Typecheck every package
 	cd $(REPO) && pnpm typecheck
 
 build: ## Build the client (REQUIRED before serve or deploy)
-	cd $(REPO) && pnpm --filter @cellbreak/web build
+	cd $(REPO) && pnpm --filter @cellquake/web build
 
 dev: ## Client only, with hot reload, on :5173 — no /api, so no online play
-	cd $(REPO) && pnpm --filter @cellbreak/web dev
+	cd $(REPO) && pnpm --filter @cellquake/web dev
 
 serve: build ## Worker + Durable Objects + the built client on :8788
-	cd $(REPO) && pnpm --filter @cellbreak/server dev
+	cd $(REPO) && pnpm --filter @cellquake/server dev
 
 deploy: test check build ## Publish the Worker and the client together
-	cd $(REPO) && pnpm --filter @cellbreak/server deploy
+	cd $(REPO) && pnpm --filter @cellquake/server deploy
 
 tail: ## Stream production logs
 	cd $(REPO)/apps/server && pnpm exec wrangler tail
