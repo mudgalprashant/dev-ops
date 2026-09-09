@@ -100,6 +100,29 @@ stays broken until it is done.
 - **Verify:** `pnpm test` → 29 passing.
 - **Blocks:** all local work.
 
+
+### 6a. The usage dashboard
+- **Why:** daily counts of app-versus-browser use, by version — the only way to tell
+  whether a broken release reached people and whether a fix replaced it.
+- **Only a person can do this**: it needs a Firebase project and a `firebase login` that
+  is yours.
+- **Do:**
+  1. In the Firebase console: **Authentication → Sign-in method → Google**, enabled.
+  2. **Project settings → Your apps → Web app** — copy the config into
+     `cellquake-dashboard/public/config.js` and the project ID into `.firebaserc`.
+     ⚠️ Both files ship with `{{PLACEHOLDER}}`s and the page will not sign anyone in
+     until they are filled.
+  3. From `cellquake/apps/server`:
+     `wrangler secret put FIREBASE_PROJECT_ID`, `wrangler secret put DASHBOARD_EMAILS`,
+     then `wrangler deploy`.
+  4. From `cellquake-dashboard`: `firebase login`, then `npm run deploy`.
+- **Verify:** open `https://<project>.web.app` and sign in — figures appear. Then sign in
+  with an address that is *not* on the list, and confirm you are refused. Check the
+  refusal by trying it, not by reading the code.
+- ⚠️ **Until both secrets are set, `/api/usage` answers 401 to everyone, including you.**
+  Deliberate: see `secrets.md`.
+- **Blocks:** knowing anything about how the game is actually used. Nothing else.
+
 ---
 
 ## After the first real game

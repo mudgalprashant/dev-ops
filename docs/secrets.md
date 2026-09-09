@@ -12,8 +12,20 @@ applies_to: [cellbreak]
 | Secret | Lives in | Reachable by the app? | Blast radius if leaked |
 | --- | --- | --- | --- |
 | `CLOUDFLARE_API_TOKEN` | GitHub Actions secret | **no** | someone can deploy arbitrary code to your Worker |
+| `DASHBOARD_EMAILS` | Wrangler secret on the Worker | read at runtime by `/api/usage` | the addresses become readable, and anyone holding it learns who the owner is. It grants nothing on its own — a caller still needs a Google token for one of those addresses |
+| `FIREBASE_PROJECT_ID` | Wrangler secret on the Worker | read at runtime by `/api/usage` | none directly. It is a project identifier and is public in the dashboard's own `config.js`; it is a secret here only so the pair is set together and the endpoint stays closed until both are |
 
-That is the list. One credential, held by CI, never read at runtime.
+⚠️ **The runtime half of this table is new.** The doc used to end "one credential, held by
+CI, never read at runtime", and that was true until the usage dashboard. Two values are now
+read at runtime, both by `/api/usage` and by nothing else — the design change is stated at
+`global-context/shared/decisions.md` #102, as this page asks for below.
+
+Set them with `wrangler secret put <NAME>` from `apps/server`. Neither is in any repo:
+an address in a repo is an address in every clone of it.
+
+⚠️ **Until both are set, `/api/usage` refuses everyone, including the owner.** That is
+deliberate — see `security-baseline.md` invariant 6. A misconfiguration that opens the
+door is the one nobody notices, because everything appears to work.
 
 ## The top-tier credential
 
@@ -48,9 +60,17 @@ logged, never in a URL, and dies with the room.
 
 ## What there is no secret for
 
-No database password, no signing key, no OAuth client secret, no model-provider key. If a
-change is about to introduce one, that is a design change worth stating out loud in
-`global-context/shared/decisions.md` — not a config change.
+No database password, no OAuth **client secret**, no model-provider key. The dashboard's
+sign-in needs none: Google's public keys verify the token, and a Firebase web config is an
+address rather than an authenticator.
+
+If a change is about to introduce one, that is a design change worth stating out loud in
+`global-context/shared/decisions.md` — not a config change. That is what happened with the
+two runtime values above (#102).
+
+⚠️ **The Android upload keystore and its password are NOT in this inventory** and should
+be. They are held by the owner outside every repo. Never paste either into a chat, an
+issue or a commit.
 
 ## Rotating
 
